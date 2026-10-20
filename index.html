@@ -1,0 +1,2728 @@
+<!DOCTYPE html>
+<html lang="ru" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Морские пути: Гео-Логист PRO</title>
+
+  <!-- Telegram WebApp SDK для авто-раскрытия на телефонах -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Leaflet CSS & JS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- TopoJSON Client для слепой векторной карты мира -->
+  <script src="https://unpkg.com/topojson-client@3.1.0/dist/topojson-client.min.js"></script>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+  <style>
+    * {
+      -webkit-tap-highlight-color: transparent;
+    }
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #060b14;
+      color: #f8fafc;
+      overflow: hidden;
+      user-select: none;
+      width: 100vw;
+      height: 100dvh;
+    }
+    .mono {
+      font-family: 'JetBrains Mono', monospace;
+    }
+    #map {
+      width: 100vw;
+      height: 100dvh;
+      z-index: 1;
+      background: radial-gradient(circle at center, #0c192c 0%, #050a12 100%);
+    }
+    .leaflet-container {
+      background: #07111e !important;
+      font-family: 'Inter', sans-serif;
+    }
+
+    /* Полное удаление плашки и флага Leaflet */
+    .leaflet-control-attribution,
+    .leaflet-bottom.leaflet-right .leaflet-control-attribution {
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
+
+    .crosshair-cursor,
+    .crosshair-cursor .leaflet-grab,
+    .crosshair-cursor .leaflet-interactive {
+      cursor: crosshair !important;
+    }
+
+    .glass-panel {
+      background: rgba(10, 16, 30, 0.93);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid rgba(255, 255, 255, 0.13);
+    }
+
+    .tactical-tooltip {
+      background: rgba(15, 23, 42, 0.96) !important;
+      color: #f8fafc !important;
+      border: 1px solid rgba(56, 189, 248, 0.45) !important;
+      border-radius: 8px !important;
+      padding: 4px 9px !important;
+      font-weight: 600;
+      font-size: 11px;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.65) !important;
+      pointer-events: none !important;
+    }
+    .tactical-tooltip::before {
+      display: none !important;
+    }
+
+    @keyframes float-ship {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-3px); }
+    }
+    .ship-marker-anim {
+      animation: float-ship 2.5s ease-in-out infinite;
+    }
+
+    ::-webkit-scrollbar {
+      width: 5px;
+      height: 5px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 3px;
+    }
+  </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden">
+
+  <!-- КАРТА (LEAFLET) -->
+  <div id="map"></div>
+
+  <!-- АДАПТИВНЫЙ ВЕРХНИЙ HUD (КОМПАКТНЫЙ НА МОБИЛКАХ, ПРОСТОРНЫЙ НА ПК) -->
+  <header class="fixed top-2 sm:top-3 left-2 sm:left-3 right-2 sm:right-3 z-20 pointer-events-none">
+    <div class="max-w-7xl mx-auto w-full glass-panel rounded-2xl px-3 py-2 sm:px-4 sm:py-2.5 shadow-2xl pointer-events-auto flex flex-col gap-1.5 sm:gap-2">
+      
+      <!-- Строка 1: Название маршрута, статусы и кнопки Штаба / Дока -->
+      <div class="flex items-center justify-between gap-2">
+        <div class="flex items-center gap-2 sm:gap-3 min-w-0">
+          <button onclick="openHubModal('contracts')" class="w-9 h-9 sm:w-11 sm:h-11 shrink-0 rounded-xl bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/40 flex items-center justify-center text-emerald-400 transition shadow-md" title="Штаб компании и Верфь">
+            <span class="text-base sm:text-xl">⚓</span>
+          </button>
+          <div class="min-w-0">
+            <div class="flex items-center gap-1.5 flex-wrap leading-none">
+              <span id="hud-rank-badge" class="text-[9px] sm:text-[10px] uppercase tracking-wider font-bold px-1.5 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">Ранг 1 • Кадет</span>
+              <span id="hud-cargo-badge" class="text-[9px] sm:text-[10px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30">📦 Стандарт x1.0</span>
+              <span id="hud-step-counter" class="text-[10px] sm:text-xs mono text-emerald-400 font-bold">Узел #1</span>
+            </div>
+            <div class="flex items-center gap-1.5 mt-0.5">
+              <h1 id="hud-contract-title" class="text-xs sm:text-base font-bold text-white tracking-tight truncate">Пряности и Кофе Востока</h1>
+              <span id="hud-current-node" class="text-xs text-slate-400 font-medium hidden md:inline shrink-0">• 📍 Мумбаи</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Правый блок кнопок: Док и Штаб -->
+        <div class="flex items-center gap-1.5 sm:gap-2 shrink-0">
+          <button id="btn-shop" onclick="toggleShopModal()" class="hidden px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 text-[11px] sm:text-xs font-bold transition flex items-center gap-1">
+            <span>⚓</span>
+            <span class="hidden sm:inline">Портовый</span>
+            <span>Док</span>
+          </button>
+
+          <button onclick="openHubModal('contracts')" class="px-2.5 sm:px-3.5 py-1.5 rounded-xl text-[11px] sm:text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white border border-indigo-400/40 shadow-lg transition flex items-center gap-1.5">
+            <span>🚢 Штаб</span>
+            <span id="hud-bank-badge" class="px-1.5 py-0.5 bg-indigo-950/90 rounded text-[10px] sm:text-[11px] mono text-emerald-300">$400</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Строка 2: Ресурсы корабля + Переключатель карты в один компактный ряд -->
+      <div class="flex items-center justify-between gap-1.5 pt-1.5 border-t border-slate-800/80">
+        
+        <div class="flex items-center gap-1.5 sm:gap-3 overflow-x-auto no-scrollbar">
+          <!-- Мазут -->
+          <div class="bg-slate-900/90 border border-slate-800 rounded-lg px-2 py-1 flex items-center gap-1.5 shrink-0">
+            <span class="text-amber-400 text-[11px] sm:text-xs font-medium">⛽<span class="hidden sm:inline"> Мазут</span></span>
+            <span id="hud-fuel" class="mono text-xs sm:text-sm font-bold text-white">95</span>
+            <div class="w-8 sm:w-14 h-1.5 sm:h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div id="hud-fuel-bar" class="h-full bg-amber-400 transition-all duration-500" style="width: 100%"></div>
+            </div>
+          </div>
+
+          <!-- Трюм (HP) -->
+          <div class="bg-slate-900/90 border border-slate-800 rounded-lg px-2 py-1 flex items-center gap-1 shrink-0">
+            <span class="text-rose-400 text-[11px] sm:text-xs font-medium hidden sm:inline">🛡️ Трюм</span>
+            <div id="hud-hp" class="flex items-center gap-0.5 text-[11px] sm:text-sm">❤️❤️❤️</div>
+          </div>
+
+          <!-- Фрахт -->
+          <div class="bg-slate-900/90 border border-slate-800 rounded-lg px-2 py-1 flex items-center gap-1 shrink-0">
+            <span class="text-emerald-400 text-[11px] sm:text-xs font-medium">💵<span class="hidden sm:inline"> Фрахт</span></span>
+            <span id="hud-run-cash" class="mono text-xs sm:text-sm font-bold text-emerald-400">$250</span>
+          </div>
+
+          <!-- Серия -->
+          <div class="bg-slate-900/90 border border-slate-800 rounded-lg px-2 py-1 flex items-center gap-1 shrink-0">
+            <span class="text-orange-400 text-[11px] sm:text-xs font-medium">🔥</span>
+            <span id="hud-streak" class="mono text-xs sm:text-sm font-bold text-orange-400">x1.0</span>
+          </div>
+        </div>
+
+        <!-- Компактный переключатель слоев слепой карты -->
+        <div class="bg-slate-900/95 border border-slate-800 rounded-lg p-0.5 flex items-center gap-0.5 shrink-0">
+          <button id="layer-btn-vector" onclick="setMapStyle('vector')" class="px-1.5 sm:px-2 py-1 rounded-md text-[10px] sm:text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 transition" title="Контурная карта">
+            🗺️<span class="hidden md:inline"> Контур</span>
+          </button>
+          <button id="layer-btn-satellite" onclick="setMapStyle('satellite')" class="px-1.5 sm:px-2 py-1 rounded-md text-[10px] sm:text-[11px] font-semibold text-slate-400 hover:text-white transition" title="Спутниковый снимок">
+            🛰️<span class="hidden md:inline"> Спутник</span>
+          </button>
+          <button id="layer-btn-radar" onclick="setMapStyle('radar')" class="px-1.5 sm:px-2 py-1 rounded-md text-[10px] sm:text-[11px] font-semibold text-slate-400 hover:text-white transition" title="Темный радар">
+            🌑<span class="hidden md:inline"> Тёмная</span>
+          </button>
+        </div>
+
+      </div>
+    </div>
+  </header>
+
+  <!-- ШТУРМАНСКАЯ РУБКА: ВЫБОР КУРСА ВСЛЕПУЮ (СВОРАЧИВАЕМАЯ ШТОРКА НА МОБИЛКАХ) -->
+  <section id="nav-choices-drawer" class="fixed bottom-2 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-4 z-20 pointer-events-none flex justify-center">
+    <div class="max-w-4xl w-full glass-panel rounded-2xl p-3 sm:p-4 shadow-2xl pointer-events-auto border border-slate-700/80 flex flex-col max-h-[44dvh] sm:max-h-[55dvh]">
+      
+      <!-- Шапка шторки с кнопкой сворачивания для обзора карты -->
+      <div onclick="toggleNavDrawerCollapse()" class="flex items-center justify-between gap-2 pb-2 mb-2 border-b border-slate-800 cursor-pointer select-none">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full bg-emerald-400 animate-ping shrink-0"></span>
+          <span class="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-emerald-300 truncate">
+            🧭 Прокладка курса: Выберите следующую точку
+          </span>
+        </div>
+        <button type="button" id="nav-collapse-btn" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] sm:text-xs text-slate-300 font-semibold shrink-0">
+          Свернуть ▼
+        </button>
+      </div>
+
+      <!-- Скрываемое тело шторки -->
+      <div id="nav-drawer-body" class="overflow-y-auto pr-0.5 space-y-2">
+        <div class="flex flex-wrap items-center justify-between gap-1 text-[11px] sm:text-xs">
+          <p id="nav-context-hint" class="text-slate-300 leading-snug">
+            Определите по карте, через какой узел лежит оптимальный фарватер к цели:
+          </p>
+          <span class="text-[10px] sm:text-[11px] text-amber-300/90 font-medium">
+            ⚠️ Осторожно: есть ложные направления!
+          </span>
+        </div>
+
+        <div id="nav-choices-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2"></div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ПАНЕЛЬ ИСПЫТАНИЯ (ПЕЛЕНГАЦИЯ / ТАМОЖНЯ / ШТОРМ / РЕЗУЛЬТАТ) -->
+  <section id="challenge-drawer" class="fixed bottom-2 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-4 z-20 pointer-events-none hidden justify-center">
+    <div class="max-w-3xl w-full glass-panel rounded-2xl p-3 sm:p-5 shadow-2xl pointer-events-auto border border-slate-700/80 flex flex-col max-h-[48dvh] sm:max-h-[62dvh]">
+      
+      <!-- Шапка челенджа + Таймер + Подсказки + Кнопка свернуть -->
+      <div class="flex flex-wrap items-center justify-between gap-1.5 pb-2 mb-2 border-b border-slate-800/80">
+        <div class="flex items-center gap-1.5 flex-wrap">
+          <span id="ch-badge" class="px-2 py-0.5 rounded text-[10px] sm:text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30">
+            🎯 ПЕЛЕНГАЦИЯ
+          </span>
+          <span id="ch-node-name" class="text-[11px] sm:text-xs text-slate-300 font-semibold truncate max-w-[160px] sm:max-w-none">
+            Курс: Ормузский пролив
+          </span>
+        </div>
+
+        <div class="flex items-center gap-1.5">
+          <!-- Радиопеленгатор (подсказка сектора) -->
+          <button id="btn-tactical-sonar" onclick="useSonarHint()" class="hidden px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-300 border border-cyan-500/40 transition flex items-center gap-1">
+            <span>📡 Сонар</span>
+            <span class="mono text-[10px] text-cyan-200">(-$120)</span>
+          </button>
+
+          <!-- Таможенный брокер -->
+          <button id="btn-tactical-broker" onclick="useBrokerHint()" class="hidden px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg text-[10px] sm:text-xs font-semibold bg-purple-500/20 hover:bg-purple-500/30 text-purple-300 border border-purple-500/40 transition flex items-center gap-1">
+            <span>🕵️ Лоцман</span>
+            <span class="mono text-[10px] text-purple-200">(-$90)</span>
+          </button>
+
+          <!-- Таймер -->
+          <div class="bg-slate-900/90 border border-slate-700 px-2 py-0.5 sm:px-2.5 sm:py-1 rounded-lg flex items-center gap-1">
+            <span class="text-[10px] sm:text-xs">⏱️</span>
+            <span id="ch-timer" class="mono text-[10px] sm:text-xs font-bold text-emerald-400">15с</span>
+          </div>
+
+          <!-- Свернуть шторку, чтобы рассмотреть карту -->
+          <button onclick="toggleChallengeDrawerCollapse()" id="ch-collapse-btn" class="px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] text-slate-300 font-semibold">
+            ▼
+          </button>
+        </div>
+      </div>
+
+      <!-- Скрываемое тело испытания -->
+      <div id="ch-drawer-body" class="overflow-y-auto pr-0.5">
+        <!-- Вопрос -->
+        <h2 id="ch-prompt" class="text-xs sm:text-base font-bold text-white leading-snug mb-2.5">
+          Загрузка...
+        </h2>
+
+        <!-- Варианты ответа для текстовых проверок -->
+        <div id="ch-options-container" class="grid grid-cols-1 sm:grid-cols-3 gap-2 mb-1"></div>
+
+        <!-- Инструкция для слепого радара -->
+        <div id="ch-pinpoint-instruction" class="hidden bg-amber-500/10 border border-amber-500/30 rounded-xl px-3 py-2 text-[11px] sm:text-xs text-amber-200 flex items-center gap-2">
+          <span class="text-sm sm:text-base">🎯</span>
+          <span>Найдите эту локацию на карте самостоятельно (приближайте и двигайте карту) и <b>кликните в нужную точку</b>. Чем точнее клик — тем меньше расход мазута!</span>
+        </div>
+
+        <!-- Блок обратной связи после ответа -->
+        <div id="ch-feedback-box" class="hidden mt-2.5 pt-2.5 border-t border-slate-800">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div class="flex items-center gap-2">
+              <span id="fb-icon" class="text-lg sm:text-xl">✅</span>
+              <div>
+                <h3 id="fb-title" class="text-xs sm:text-sm font-bold text-emerald-400">Идеальная прокладка курса!</h3>
+                <p id="fb-subtitle" class="text-[11px] sm:text-xs text-slate-400">Отклонение: 42 км.</p>
+              </div>
+            </div>
+            <div id="fb-deltas" class="flex items-center gap-1.5 mono text-[11px] sm:text-xs font-bold flex-wrap"></div>
+          </div>
+
+          <div class="bg-slate-900/95 border border-slate-700/80 rounded-xl p-2.5 sm:p-3 mb-2.5">
+            <div class="text-[10px] font-bold uppercase tracking-wider text-emerald-400 mb-0.5 flex items-center gap-1">
+              <span>🌍 Навигационная сводка • Географический факт</span>
+            </div>
+            <p id="fb-lore" class="text-[11px] sm:text-sm text-slate-200 leading-relaxed"></p>
+          </div>
+
+          <div class="flex justify-end">
+            <button onclick="closeChallengeAndContinue()" class="w-full sm:w-auto px-5 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs sm:text-sm transition shadow-lg shadow-emerald-500/20">
+              Продолжить вахту →
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <!-- ГЛАВНЫЙ ШТАБ: КОНТРАКТЫ (7), ВЕРФЬ ПРОКАЧКИ И АТЛАС ОТКРЫТИЙ -->
+  <div id="hub-modal" class="fixed inset-0 z-30 bg-slate-950/85 backdrop-blur-md hidden items-center justify-center p-2.5 sm:p-5">
+    <div class="max-w-5xl w-full glass-panel rounded-2xl p-4 sm:p-6 border border-slate-700 shadow-2xl max-h-[92dvh] flex flex-col">
+      
+      <!-- Шапка штаба с капиталом и опытом -->
+      <div class="flex items-center justify-between gap-2 mb-3 pb-2.5 border-b border-slate-800">
+        <div class="min-w-0">
+          <div class="flex items-center gap-2 flex-wrap">
+            <span class="text-[10px] font-bold uppercase tracking-widest text-emerald-400">Судоходная компания</span>
+            <span id="hub-rank-pill" class="px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 text-[10px] sm:text-xs font-bold">Ранг 1 • Кадет (0 XP)</span>
+          </div>
+          <h2 class="text-base sm:text-2xl font-extrabold text-white mt-0.5 truncate">Штаб флота, Биржа и Верфь</h2>
+        </div>
+
+        <div class="flex items-center gap-2 shrink-0">
+          <div class="bg-slate-900 border border-emerald-500/40 rounded-xl px-2.5 py-1 sm:px-3.5 sm:py-1.5 text-right">
+            <div class="text-[9px] sm:text-[10px] text-slate-400 uppercase">Банк компании</div>
+            <div id="hub-bank-balance" class="mono text-xs sm:text-base font-extrabold text-emerald-400">$400</div>
+          </div>
+          <button onclick="closeHubModal()" class="w-8 h-8 sm:w-9 sm:h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white flex items-center justify-center text-base">✕</button>
+        </div>
+      </div>
+
+      <!-- Вкладки: Контракты | Верфь (Апгрейды) | Атлас Штурмана -->
+      <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+        <div class="flex items-center gap-1 sm:gap-2 bg-slate-900/90 p-1 rounded-xl border border-slate-800 w-full sm:w-auto">
+          <button id="tab-btn-contracts" onclick="switchHubTab('contracts')" class="flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold bg-emerald-500 text-slate-950 transition">
+            📋 Экспедиции (7)
+          </button>
+          <button id="tab-btn-shipyard" onclick="switchHubTab('shipyard')" class="flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold text-slate-300 hover:text-white transition">
+            🛠️ Верфь
+          </button>
+          <button id="tab-btn-atlas" onclick="switchHubTab('atlas')" class="flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold text-slate-300 hover:text-white transition">
+            🌍 Атлас (<span id="atlas-count-badge">0</span>)
+          </button>
+        </div>
+
+        <button onclick="resetCareerProgress()" class="text-[10px] sm:text-[11px] text-slate-500 hover:text-rose-400 transition underline ml-auto">
+          Сбросить карьеру
+        </button>
+      </div>
+
+      <!-- Контент вкладки 1: КОНТРАКТЫ + ВЫБОР ТИПА ГРУЗА -->
+      <div id="hub-tab-contracts" class="overflow-y-auto pr-1 space-y-3 flex-1">
+        <div class="bg-slate-900/70 border border-slate-800 rounded-xl p-3">
+          <div class="text-[11px] sm:text-xs font-bold uppercase tracking-wider text-amber-300 mb-2">
+            Выберите класс груза на следующий рейс (множитель риска и награды):
+          </div>
+          <div id="cargo-selector-grid" class="grid grid-cols-1 md:grid-cols-3 gap-2"></div>
+        </div>
+
+        <div id="contracts-selector-grid" class="grid grid-cols-1 md:grid-cols-2 gap-2.5"></div>
+      </div>
+
+      <!-- Контент вкладки 2: ВЕРФЬ И АПГРЕЙДЫ СУДНА -->
+      <div id="hub-tab-shipyard" class="hidden overflow-y-auto pr-1 space-y-3 flex-1">
+        <div class="bg-indigo-950/30 border border-indigo-500/30 rounded-xl p-3 sm:p-4 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 class="text-xs sm:text-sm font-bold text-white">Инженерная док-станция вашего судна</h3>
+            <p class="text-[11px] sm:text-xs text-slate-300">Каждое улучшение навсегда повышает характеристики корабля для дальних океанских трасс.</p>
+          </div>
+          <div id="ship-summary-specs" class="mono text-[11px] sm:text-xs text-sky-300 bg-slate-900/90 px-2.5 py-1.5 rounded-lg border border-slate-700"></div>
+        </div>
+        <div id="upgrades-grid" class="grid grid-cols-1 md:grid-cols-2 gap-2.5"></div>
+      </div>
+
+      <!-- Контент вкладки 3: АТЛАС ОТКРЫТЫХ ЛОКАЦИЙ -->
+      <div id="hub-tab-atlas" class="hidden overflow-y-auto pr-1 space-y-2.5 flex-1">
+        <p class="text-[11px] sm:text-xs text-slate-400">
+          Локации заносятся в ваш Атлас навсегда, когда вы находите их на слепом радаре или проходите во время экспедиции. Каждая открытая точка дает <b>+15 XP</b> к рангу капитана.
+        </p>
+        <div id="atlas-grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5"></div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- МОДАЛЬНОЕ ОКНО: ПОРТОВЫЙ ТЕРМИНАЛ В РЕЙСЕ -->
+  <div id="shop-modal" class="fixed inset-0 z-30 bg-slate-950/75 backdrop-blur-sm hidden items-center justify-center p-3">
+    <div class="max-w-md w-full glass-panel rounded-2xl p-5 border border-slate-700 shadow-2xl">
+      <div class="flex items-center justify-between mb-3.5">
+        <div class="flex items-center gap-2">
+          <span class="text-xl">⚓</span>
+          <div>
+            <h3 class="text-base font-bold text-white">Портовый терминал</h3>
+            <p id="shop-port-name" class="text-[11px] text-slate-400">Оплата из текущего фрахта рейса</p>
+          </div>
+        </div>
+        <button onclick="toggleShopModal()" class="text-slate-400 hover:text-white text-base">✕</button>
+      </div>
+
+      <div class="space-y-2 mb-4">
+        <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+          <div>
+            <div class="text-xs sm:text-sm font-bold text-white">⛽ Бункеровка мазутом (+30 ед.)</div>
+            <div class="text-[11px] text-slate-400">Пополнение баков для следующего перехода</div>
+          </div>
+          <button onclick="buyShopItem('fuel')" class="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs mono transition">
+            $140
+          </button>
+        </div>
+
+        <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+          <div>
+            <div class="text-xs sm:text-sm font-bold text-white">🛢️ Резервная канистра (+15 ед.)</div>
+            <div class="text-[11px] text-slate-400">Экстренная дозаправка</div>
+          </div>
+          <button onclick="buyShopItem('fuel_small')" class="px-3 py-1.5 rounded-lg bg-amber-500/80 hover:bg-amber-400 text-slate-950 font-bold text-xs mono transition">
+            $75
+          </button>
+        </div>
+
+        <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-3 flex items-center justify-between">
+          <div>
+            <div class="text-xs sm:text-sm font-bold text-white">🛠️ Ремонт обшивки и трюма (+1 HP)</div>
+            <div class="text-[11px] text-slate-400">Восстановление после рифов и штормов</div>
+          </div>
+          <button onclick="buyShopItem('hp')" class="px-3 py-1.5 rounded-lg bg-rose-500 hover:bg-rose-400 text-white font-bold text-xs mono transition">
+            $180
+          </button>
+        </div>
+      </div>
+
+      <div class="flex justify-end">
+        <button onclick="toggleShopModal()" class="w-full sm:w-auto px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold">
+          Вернуться на мостик
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- МОДАЛЬНОЕ ОКНО: ФИНАЛ РЕЙСА -->
+  <div id="endgame-modal" class="fixed inset-0 z-30 bg-slate-950/85 backdrop-blur-md hidden items-center justify-center p-3">
+    <div class="max-w-lg w-full glass-panel rounded-2xl p-5 border border-slate-700 shadow-2xl text-center">
+      <div id="end-icon" class="text-4xl sm:text-5xl mb-2">🏆</div>
+      <span id="end-badge" class="px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold uppercase tracking-widest bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+        КОНТРАКТ ВЫПОЛНЕН
+      </span>
+      <h2 id="end-title" class="text-lg sm:text-2xl font-extrabold text-white mt-2 mb-1">Швартовка завершена!</h2>
+      <p id="end-subtitle" class="text-xs sm:text-sm text-slate-400 mb-4">Выручка переведена на счет вашей судоходной компании.</p>
+
+      <div class="bg-slate-900/95 border border-slate-800 rounded-xl p-3.5 mb-4 text-left">
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-center mb-3">
+          <div class="bg-slate-950/80 p-2 rounded-lg border border-slate-800/80">
+            <div class="text-[9px] text-slate-400 uppercase">Чистая прибыль</div>
+            <div id="end-stat-cash" class="mono text-xs sm:text-sm font-bold text-emerald-400 mt-0.5">+$0</div>
+          </div>
+          <div class="bg-slate-950/80 p-2 rounded-lg border border-slate-800/80">
+            <div class="text-[9px] text-slate-400 uppercase">Опыт капитана</div>
+            <div id="end-stat-xp" class="mono text-xs sm:text-sm font-bold text-indigo-400 mt-0.5">+0 XP</div>
+          </div>
+          <div class="bg-slate-950/80 p-2 rounded-lg border border-slate-800/80">
+            <div class="text-[9px] text-slate-400 uppercase">Остаток мазута</div>
+            <div id="end-stat-fuel" class="mono text-xs sm:text-sm font-bold text-amber-400 mt-0.5">0 ед.</div>
+          </div>
+          <div class="bg-slate-950/80 p-2 rounded-lg border border-slate-800/80">
+            <div class="text-[9px] text-slate-400 uppercase">Ранг навигации</div>
+            <div id="end-stat-rank" class="mono text-xs sm:text-sm font-bold text-purple-400 mt-0.5">S</div>
+          </div>
+        </div>
+        <div class="text-[11px] sm:text-xs text-slate-400">
+          <span class="font-semibold text-slate-300">Пройденный фарватер:</span>
+          <span id="end-route-chain" class="mono text-emerald-400 block mt-0.5"></span>
+        </div>
+      </div>
+
+      <div class="flex flex-col sm:flex-row gap-2 justify-center">
+        <button onclick="closeEndgameAndOpenHub('shipyard')" class="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs transition">
+          🛠️ Прокачать судно на Верфи
+        </button>
+        <button onclick="closeEndgameAndOpenHub('contracts')" class="px-5 py-2.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs transition shadow-lg">
+          📋 Следующий рейс →
+        </button>
+        <button onclick="restartCurrentContract()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-semibold text-xs transition">
+          🔄 Повторить
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Инициализация Telegram Mini App на весь экран смартфона
+    if (window.Telegram && window.Telegram.WebApp) {
+      window.Telegram.WebApp.ready();
+      window.Telegram.WebApp.expand();
+      try {
+        window.Telegram.WebApp.disableVerticalSwipes?.();
+      } catch (e) {}
+    }
+
+    // Принудительное отключение любых префиксов и флагов в Leaflet
+    if (window.L && L.Control && L.Control.Attribution) {
+      L.Control.Attribution.prototype.options.prefix = false;
+    }
+
+    // =========================================================================
+    // 1. СИСТЕМА КАРЬЕРЫ, ГРУЗОВ, ПРОКАЧКИ ВЕРФИ И 7 МНОГОЭТАПНЫХ ЭКСПЕДИЦИЙ
+    // =========================================================================
+    const CARGO_TYPES = [
+      {
+        id: "standard",
+        name: "📦 Стандартный фрахт",
+        badge: "📦 Стандарт x1.0",
+        mult: 1.0,
+        timer_sec: 18,
+        hp_penalty_mult: 1,
+        desc: "Сбалансированный контракт. Стандартное время на пеленгацию (18 сек) и обычный урон при ошибках."
+      },
+      {
+        id: "express",
+        name: "❄️ Экспресс: Вакцины и Крио-груз",
+        badge: "❄️ Экспресс x1.5",
+        mult: 1.5,
+        timer_sec: 11,
+        hp_penalty_mult: 1,
+        desc: "+50% к деньгам за рейс! Жесткий лимит времени (11 сек на ответ): просрочка таймера сжигает бонус и 5 ед. топлива."
+      },
+      {
+        id: "hazmat",
+        name: "☢️ Опасный спецгруз (Хардкор)",
+        badge: "☢️ Спецгруз x2.2",
+        mult: 2.2,
+        timer_sec: 14,
+        hp_penalty_mult: 2,
+        desc: "+120% к выплатам! Любая ошибка в проливе или выбор ложного курса отнимает сразу 2 HP трюма вместо 1."
+      }
+    ];
+
+    const UPGRADE_DEFS = {
+      tank: {
+        name: "⛽ Топливные танки",
+        desc: "Увеличивает максимальный запас мазута на старте каждого рейса.",
+        costs: [0, 350, 750, 1400, 2400],
+        values: [95, 115, 135, 155, 180]
+      },
+      hull: {
+        name: "🛡️ Усиление двойного дна",
+        desc: "Повышает максимальную прочность трюма (HP) против рифов и штормов.",
+        costs: [0, 400, 900, 1600, 2800],
+        values: [3, 4, 5, 6, 7]
+      },
+      radar: {
+        name: "🛰️ Спутниковая пеленгация",
+        desc: "Расширяет радиус идеального и допустимого попадания на слепой карте.",
+        costs: [0, 350, 800, 1500, 2500],
+        values: [1.0, 1.2, 1.4, 1.65, 1.9]
+      },
+      engine: {
+        name: "⚙️ Форсированный дизель",
+        desc: "Снижает базовый расход топлива на каждом морском переходе.",
+        costs: [0, 400, 850, 1600, 2600],
+        values: [1.0, 0.90, 0.82, 0.74, 0.66]
+      }
+    };
+
+    const WORLD_NODES = {
+      "port_mumbai": { name: "Мумбаи", tag: "Порт", coords: [18.948, 72.835], has_shop: true },
+      "strait_hormuz": { name: "Ормузский пролив", tag: "Пролив", coords: [26.566, 56.250], has_shop: false },
+      "port_jebel_ali": { name: "Порт Джебель-Али (Дубай)", tag: "Мега-порт", coords: [25.011, 55.061], has_shop: true },
+      "strait_bab_el_mandeb": { name: "Баб-эль-Мандебский пролив", tag: "Пролив", coords: [12.585, 43.333], has_shop: false },
+      "port_jeddah": { name: "Джидда", tag: "Порт", coords: [21.485, 39.192], has_shop: true },
+      "canal_suez": { name: "Суэцкий канал (Порт-Саид)", tag: "Канал", coords: [30.585, 32.265], has_shop: false },
+      "port_piraeus": { name: "Пирей (Афины)", tag: "Порт", coords: [37.942, 23.646], has_shop: true },
+      "port_istanbul": { name: "Стамбул (Пролив Босфор)", tag: "Пролив / Порт", coords: [41.008, 28.978], has_shop: true },
+
+      "port_spb": { name: "Санкт-Петербург", tag: "Порт", coords: [59.934, 30.306], has_shop: true },
+      "strait_oresund": { name: "Пролив Эресунн (Зунд)", tag: "Пролив", coords: [55.950, 12.680], has_shop: false },
+      "canal_kiel": { name: "Кильский канал", tag: "Шлюзовой канал", coords: [54.150, 9.650], has_shop: true },
+      "port_gothenburg": { name: "Гётеборг (Пролив Каттегат)", tag: "Порт", coords: [57.708, 11.974], has_shop: true },
+      "strait_dover": { name: "Пролив Па-де-Кале (Ла-Манш)", tag: "Пролив", coords: [51.050, 1.450], has_shop: false },
+      "port_brest": { name: "Брест (Полуостров Бретань)", tag: "Порт", coords: [48.390, -4.486], has_shop: true },
+      "cape_finisterre": { name: "Мыс Финистерре (Галисия)", tag: "Мыс", coords: [42.882, -9.272], has_shop: false },
+      "port_lisbon": { name: "Лиссабон (Устье Тежу)", tag: "Порт", coords: [38.722, -9.139], has_shop: true },
+
+      "port_shanghai": { name: "Шанхай", tag: "Мега-порт", coords: [31.230, 121.473], has_shop: true },
+      "strait_taiwan": { name: "Тайваньский (Формозский) пролив", tag: "Пролив", coords: [24.500, 119.500], has_shop: false },
+      "port_singapore": { name: "Сингапур (Малаккский пролив)", tag: "Мега-порт", coords: [1.264, 103.840], has_shop: true },
+      "port_colombo": { name: "Коломбо (Шри-Ланка)", tag: "Порт-хаб", coords: [6.949, 79.842], has_shop: true },
+      "strait_gibraltar": { name: "Гибралтарский пролив", tag: "Пролив", coords: [35.966, -5.498], has_shop: true },
+      "port_rotterdam": { name: "Роттердам (Европорт)", tag: "Мега-порт", coords: [51.924, 4.477], has_shop: true },
+
+      "port_valparaiso": { name: "Вальпараисо (Чили)", tag: "Порт", coords: [-33.047, -71.612], has_shop: true },
+      "port_callao": { name: "Кальяо (Лима, Перу)", tag: "Порт-хаб", coords: [-12.056, -77.148], has_shop: true },
+      "arch_galapagos": { name: "Галапагосские острова", tag: "Архипелаг", coords: [-0.740, -90.310], has_shop: false },
+      "canal_panama": { name: "Панамский канал (Бальбоа — Колон)", tag: "Канал", coords: [9.080, -79.680], has_shop: true },
+      "port_kingston": { name: "Кингстон (Ямайка)", tag: "Порт-хаб", coords: [17.971, -76.792], has_shop: true },
+      "strait_yucatan": { name: "Юкатанский пролив", tag: "Пролив", coords: [21.750, -85.830], has_shop: false },
+      "port_new_orleans": { name: "Новый Орлеан (Дельта Миссисипи)", tag: "Порт", coords: [29.951, -90.071], has_shop: true },
+
+      "port_yokohama": { name: "Иокогама (Токийский залив)", tag: "Порт", coords: [35.443, 139.638], has_shop: true },
+      "strait_luzon": { name: "Лусонский пролив (Баши)", tag: "Пролив", coords: [20.350, 121.300], has_shop: false },
+      "port_manila": { name: "Манила (Остров Лусон)", tag: "Порт-хаб", coords: [14.599, 120.984], has_shop: true },
+      "strait_makassar": { name: "Макасарский пролив (Борнео — Сулавеси)", tag: "Пролив", coords: [-1.850, 118.250], has_shop: false },
+      "strait_torres": { name: "Торресов пролив (Мыс Йорк)", tag: "Рифовый пролив", coords: [-10.350, 142.200], has_shop: false },
+      "port_brisbane": { name: "Брисбен (Коралловое море)", tag: "Порт", coords: [-27.380, 153.170], has_shop: true },
+      "port_sydney": { name: "Сидней (Залив Порт-Джексон)", tag: "Порт", coords: [-33.868, 151.209], has_shop: true },
+
+      "port_murmansk": { name: "Мурманск (Кольский залив)", tag: "Порт", coords: [68.970, 33.075], has_shop: true },
+      "strait_kara_gates": { name: "Пролив Карские Ворота", tag: "Пролив", coords: [70.450, 58.050], has_shop: false },
+      "port_sabetta": { name: "Порт Сабетта (Обская губа, Ямал)", tag: "Порт-хаб", coords: [71.273, 72.072], has_shop: true },
+      "strait_vilkitsky": { name: "Пролив Вилькицкого (Мыс Челюскин)", tag: "Пролив", coords: [77.950, 103.500], has_shop: false },
+      "port_pevek": { name: "Певек (Восточно-Сибирское море)", tag: "Порт-хаб", coords: [69.700, 170.310], has_shop: true },
+      "strait_bering": { name: "Берингов пролив (Мыс Дежнёва)", tag: "Пролив", coords: [65.500, 178.900], has_shop: false },
+      "port_petropavlovsk": { name: "Петропавловск-Камчатский", tag: "Порт-хаб", coords: [53.019, 158.650], has_shop: true },
+      "strait_laperouse": { name: "Пролив Лаперуза (Сахалин — Хоккайдо)", tag: "Пролив", coords: [45.720, 142.020], has_shop: false },
+      "port_vladivostok": { name: "Владивосток (Залив Петра Великого)", tag: "Порт", coords: [43.115, 131.885], has_shop: true },
+
+      "port_santos": { name: "Сантус (Сан-Паулу, Бразилия)", tag: "Порт", coords: [-23.960, -46.333], has_shop: true },
+      "island_tristan": { name: "Архипелаг Тристан-да-Кунья", tag: "Архипелаг", coords: [-37.105, -12.277], has_shop: false },
+      "cape_good_hope": { name: "Мыс Доброй Надежды (Кейптаун)", tag: "Мыс / Порт", coords: [-34.356, 18.473], has_shop: true },
+      "channel_mozambique": { name: "Мозамбикский пролив", tag: "Пролив", coords: [-17.000, 41.500], has_shop: false },
+      "port_port_louis": { name: "Порт-Луи (Маврикий)", tag: "Порт-хаб", coords: [-20.160, 57.501], has_shop: true },
+      "strait_sunda": { name: "Зондский пролив (Вулкан Кракатау)", tag: "Пролив", coords: [-5.922, 105.850], has_shop: false }
+    };
+
+    const TRAP_NODES = {
+      "trap_maldives": {
+        name: "Атолл Мале (Мальдивы)",
+        tag: "Архипелаг",
+        fuel_penalty: 18,
+        hp_penalty: 0,
+        reason: "Географическая ошибка курса! Вы ушли далеко на юг к экватору в сторону Мальдив вместо северо-западного курса в Аравийское и Красное моря. Пришлось сжечь уйму мазута на разворот."
+      },
+      "trap_messina": {
+        name: "Мессинский пролив (Сицилия)",
+        tag: "Пролив",
+        fuel_penalty: 16,
+        hp_penalty: 0,
+        reason: "Ложный курс! Мессинский пролив находится между Италией и Сицилией на западе, а наш маршрут из Суэца в Стамбул идет строго на север через Эгейское море!"
+      },
+      "trap_bothnia": {
+        name: "Ботнический залив (Аландские о-ва)",
+        tag: "Залив",
+        fuel_penalty: 17,
+        hp_penalty: 0,
+        reason: "Тупиковый курс! Ботнический залив уходит на север между Финляндией и Швецией. Чтобы выйти из Балтики в Атлантику, нужно было идти на юго-запад к Датским проливам!"
+      },
+      "trap_st_george": {
+        name: "Пролив Святого Георга (Ирландское море)",
+        tag: "Пролив",
+        fuel_penalty: 16,
+        hp_penalty: 0,
+        reason: "Крюк не туда! Пролив Святого Георга ведет на север между Ирландией и Уэльсом, тогда как путь в Португалию лежит на юг через Бискайский залив."
+      },
+      "trap_bohai": {
+        name: "Бохайский залив (Порт Тяньцзинь)",
+        tag: "Залив",
+        fuel_penalty: 18,
+        hp_penalty: 0,
+        reason: "Вы поплыли в противоположную сторону! Бохайский залив находится далеко на севере Желтого моря у Пекина, а маршрут в Европу идет на юг через Тайваньский пролив."
+      },
+      "trap_sunda_detour": {
+        name: "Бассов пролив (Тасмания)",
+        tag: "Пролив",
+        fuel_penalty: 22,
+        hp_penalty: 1,
+        reason: "Грубейшая навигационная ошибка! Бассов пролив находится на самом юге Австралии, в тысячах миль от пути из Китая в Индийский океан!"
+      },
+      "trap_magellan": {
+        name: "Магелланов пролив (Огненная Земля)",
+        tag: "Пролив",
+        fuel_penalty: 22,
+        hp_penalty: 1,
+        reason: "Вы пошли на юг к Антарктиде вместо севера! Из Вальпараисо в Новый Орлеан кратчайший путь лежит строго на север вдоль Перу к Панамскому каналу."
+      },
+      "trap_windward": {
+        name: "Наветренный пролив (Восток Кубы — Гаити)",
+        tag: "Пролив",
+        fuel_penalty: 16,
+        hp_penalty: 0,
+        reason: "Неверный пролив! Наветренный пролив уводит судно на восток в открытую Атлантику к Багамам, а Новый Орлеан находится на северо-западе за Юкатанским проливом."
+      },
+      "trap_korea": {
+        name: "Корейский (Цусимский) пролив",
+        tag: "Пролив",
+        fuel_penalty: 17,
+        hp_penalty: 0,
+        reason: "Курс в Японское море вместо Южного полушария! Из Иокогамы в Австралию нужно идти на юго-запад через Филиппинское море, а не на запад к Корее."
+      },
+      "trap_cook": {
+        name: "Пролив Кука (Новая Зеландия)",
+        tag: "Пролив",
+        fuel_penalty: 20,
+        hp_penalty: 0,
+        reason: "Вы промахнулись мимо Австралии на 2000 км! Пролив Кука разделяет острова Новой Зеландии далеко на юго-востоке Тасманова моря."
+      },
+      "trap_svalbard": {
+        name: "Пролив Фрама (Шпицберген — Гренландия)",
+        tag: "Арктический пролив",
+        fuel_penalty: 20,
+        hp_penalty: 1,
+        reason: "Вы ушли на запад к Гренландии! Северный морской путь во Владивосток идет из Мурманска строго на восток через Карские Ворота."
+      },
+      "trap_drake": {
+        name: "Пролив Дрейка (Мыс Горн)",
+        tag: "Пролив",
+        fuel_penalty: 24,
+        hp_penalty: 1,
+        reason: "Катастрофическая ошибка курса! Чтобы попасть из Бразилии в Сингапур в обход каналов, нужно идти на восток через Атлантику к Южной Африке, а не на юго-запад в ледяной пролив Дрейка!"
+      },
+      "trap_cape_verde": {
+        name: "Острова Зелёного Мыса (Кабо-Верде)",
+        tag: "Архипелаг",
+        fuel_penalty: 20,
+        hp_penalty: 0,
+        reason: "Вы ушли в Северное полушарие к Западной Африке! Кейптаун и Индийский океан находятся на юго-востоке от Бразилии."
+      }
+    };
+
+    const CONTRACTS = [
+      {
+        contract_id: "cnt_mumbai_istanbul",
+        title: "Пряности и Кофе Востока",
+        subtitle: "Мумбаи ➔ Стамбул",
+        req_rank: 1,
+        difficulty_stars: "★☆☆ УРОВЕНЬ 1 (КАДЕТ)",
+        reward_base: 450,
+        xp_reward: 100,
+        region_desc: "Аравийское море, Персидский залив, Красное море, Суэцкий канал и Босфор. Идеально для старта карьеры.",
+        start_node: "port_mumbai",
+        target_node: "port_istanbul",
+        camera_center: [25.0, 48.0],
+        camera_zoom: 4,
+        graph: {
+          "port_mumbai": [
+            { target_id: "strait_hormuz", base_fuel_cost: 16, distance_km: 1600 },
+            { target_id: "strait_bab_el_mandeb", base_fuel_cost: 24, distance_km: 2400 },
+            { target_id: "trap_maldives", is_trap: true }
+          ],
+          "strait_hormuz": [{ target_id: "port_jebel_ali", base_fuel_cost: 10, distance_km: 350 }],
+          "port_jebel_ali": [
+            { target_id: "strait_bab_el_mandeb", base_fuel_cost: 18, distance_km: 2100 },
+            { target_id: "trap_maldives", is_trap: true }
+          ],
+          "strait_bab_el_mandeb": [
+            { target_id: "port_jeddah", base_fuel_cost: 14, distance_km: 1150 },
+            { target_id: "canal_suez", base_fuel_cost: 22, distance_km: 2250 }
+          ],
+          "port_jeddah": [{ target_id: "canal_suez", base_fuel_cost: 14, distance_km: 1150 }],
+          "canal_suez": [
+            { target_id: "port_piraeus", base_fuel_cost: 14, distance_km: 1100 },
+            { target_id: "port_istanbul", base_fuel_cost: 20, distance_km: 1550 },
+            { target_id: "trap_messina", is_trap: true }
+          ],
+          "port_piraeus": [{ target_id: "port_istanbul", base_fuel_cost: 12, distance_km: 650 }],
+          "port_istanbul": []
+        }
+      },
+      {
+        contract_id: "cnt_spb_lisbon",
+        title: "Балтийский Северный Фарватер",
+        subtitle: "Санкт-Петербург ➔ Лиссабон",
+        req_rank: 1,
+        difficulty_stars: "★☆☆ УРОВЕНЬ 1 (КАДЕТ)",
+        reward_base: 500,
+        xp_reward: 110,
+        region_desc: "Выход из Балтики через Датские проливы или Кильский канал, прохождение Ла-Манша и штормового мыса Финистерре.",
+        start_node: "port_spb",
+        target_node: "port_lisbon",
+        camera_center: [50.0, 6.0],
+        camera_zoom: 4,
+        graph: {
+          "port_spb": [
+            { target_id: "strait_oresund", base_fuel_cost: 16, distance_km: 1150 },
+            { target_id: "canal_kiel", base_fuel_cost: 18, distance_km: 1350 },
+            { target_id: "trap_bothnia", is_trap: true }
+          ],
+          "strait_oresund": [
+            { target_id: "port_gothenburg", base_fuel_cost: 10, distance_km: 280 },
+            { target_id: "strait_dover", base_fuel_cost: 20, distance_km: 1250 }
+          ],
+          "canal_kiel": [{ target_id: "strait_dover", base_fuel_cost: 14, distance_km: 750 }],
+          "port_gothenburg": [{ target_id: "strait_dover", base_fuel_cost: 15, distance_km: 1050 }],
+          "strait_dover": [
+            { target_id: "port_brest", base_fuel_cost: 13, distance_km: 620 },
+            { target_id: "cape_finisterre", base_fuel_cost: 21, distance_km: 1350 },
+            { target_id: "trap_st_george", is_trap: true }
+          ],
+          "port_brest": [{ target_id: "cape_finisterre", base_fuel_cost: 14, distance_km: 750 }],
+          "cape_finisterre": [{ target_id: "port_lisbon", base_fuel_cost: 12, distance_km: 550 }],
+          "port_lisbon": []
+        }
+      },
+      {
+        contract_id: "cnt_valparaiso_neworleans",
+        title: "Андский Литий и Панамский Транзит",
+        subtitle: "Вальпараисо ➔ Новый Орлеан",
+        req_rank: 2,
+        difficulty_stars: "★★☆ УРОВЕНЬ 2 (ШТУРМАН)",
+        reward_base: 700,
+        xp_reward: 150,
+        region_desc: "Перуанское течение Гумбольдта, экваториальные Галапагосы, шлюзы Панамского канала и Мексиканский залив.",
+        start_node: "port_valparaiso",
+        target_node: "port_new_orleans",
+        camera_center: [-2.0, -80.0],
+        camera_zoom: 3,
+        graph: {
+          "port_valparaiso": [
+            { target_id: "port_callao", base_fuel_cost: 19, distance_km: 2450 },
+            { target_id: "trap_magellan", is_trap: true }
+          ],
+          "port_callao": [
+            { target_id: "arch_galapagos", base_fuel_cost: 16, distance_km: 1700 },
+            { target_id: "canal_panama", base_fuel_cost: 24, distance_km: 2550 }
+          ],
+          "arch_galapagos": [{ target_id: "canal_panama", base_fuel_cost: 16, distance_km: 1550 }],
+          "canal_panama": [
+            { target_id: "port_kingston", base_fuel_cost: 14, distance_km: 1100 },
+            { target_id: "strait_yucatan", base_fuel_cost: 20, distance_km: 1550 },
+            { target_id: "trap_windward", is_trap: true }
+          ],
+          "port_kingston": [
+            { target_id: "strait_yucatan", base_fuel_cost: 14, distance_km: 1050 },
+            { target_id: "trap_windward", is_trap: true }
+          ],
+          "strait_yucatan": [{ target_id: "port_new_orleans", base_fuel_cost: 15, distance_km: 1150 }],
+          "port_new_orleans": []
+        }
+      },
+      {
+        contract_id: "cnt_yokohama_sydney",
+        title: "Линия Уоллеса и Коралловое Море",
+        subtitle: "Иокогама (Токио) ➔ Сидней",
+        req_rank: 2,
+        difficulty_stars: "★★☆ УРОВЕНЬ 2 (ШТУРМАН)",
+        reward_base: 750,
+        xp_reward: 160,
+        region_desc: "Переход через Филиппинское море, Макасарский пролив (Борнео), опасный рифами Торресов пролив и Барьерный риф.",
+        start_node: "port_yokohama",
+        target_node: "port_sydney",
+        camera_center: [2.0, 136.0],
+        camera_zoom: 3,
+        graph: {
+          "port_yokohama": [
+            { target_id: "strait_luzon", base_fuel_cost: 18, distance_km: 2450 },
+            { target_id: "trap_korea", is_trap: true }
+          ],
+          "strait_luzon": [
+            { target_id: "port_manila", base_fuel_cost: 12, distance_km: 650 },
+            { target_id: "strait_makassar", base_fuel_cost: 23, distance_km: 2650 }
+          ],
+          "port_manila": [{ target_id: "strait_makassar", base_fuel_cost: 16, distance_km: 1950 }],
+          "strait_makassar": [
+            { target_id: "strait_torres", base_fuel_cost: 20, distance_km: 2850 },
+            { target_id: "trap_sunda_detour", is_trap: true }
+          ],
+          "strait_torres": [
+            { target_id: "port_brisbane", base_fuel_cost: 17, distance_km: 2100 },
+            { target_id: "port_sydney", base_fuel_cost: 26, distance_km: 3000 },
+            { target_id: "trap_cook", is_trap: true }
+          ],
+          "port_brisbane": [{ target_id: "port_sydney", base_fuel_cost: 12, distance_km: 920 }],
+          "port_sydney": []
+        }
+      },
+      {
+        contract_id: "cnt_shanghai_rotterdam",
+        title: "Кремниевый Экспресс: Чипы Азии",
+        subtitle: "Шанхай ➔ Роттердам",
+        req_rank: 3,
+        difficulty_stars: "★★★ УРОВЕНЬ 3 (СТАРПОМ)",
+        reward_base: 950,
+        xp_reward: 220,
+        region_desc: "Дальний трансконтинентальный рейс из 7 переходов через Тайвань, Сингапур, Цейлон, Красное море, Гибралтар и Ла-Манш.",
+        start_node: "port_shanghai",
+        target_node: "port_rotterdam",
+        camera_center: [24.0, 60.0],
+        camera_zoom: 3,
+        graph: {
+          "port_shanghai": [
+            { target_id: "strait_taiwan", base_fuel_cost: 15, distance_km: 850 },
+            { target_id: "trap_bohai", is_trap: true }
+          ],
+          "strait_taiwan": [{ target_id: "port_singapore", base_fuel_cost: 21, distance_km: 2600 }],
+          "port_singapore": [
+            { target_id: "port_colombo", base_fuel_cost: 19, distance_km: 2750 },
+            { target_id: "trap_sunda_detour", is_trap: true }
+          ],
+          "port_colombo": [
+            { target_id: "strait_bab_el_mandeb", base_fuel_cost: 21, distance_km: 3800 },
+            { target_id: "trap_maldives", is_trap: true }
+          ],
+          "strait_bab_el_mandeb": [{ target_id: "canal_suez", base_fuel_cost: 18, distance_km: 2250 }],
+          "canal_suez": [
+            { target_id: "strait_gibraltar", base_fuel_cost: 22, distance_km: 3500 },
+            { target_id: "trap_messina", is_trap: true }
+          ],
+          "strait_gibraltar": [{ target_id: "strait_dover", base_fuel_cost: 18, distance_km: 2100 }],
+          "strait_dover": [{ target_id: "port_rotterdam", base_fuel_cost: 10, distance_km: 320 }],
+          "port_rotterdam": []
+        }
+      },
+      {
+        contract_id: "cnt_murmansk_vladivostok",
+        title: "Северный Морской Путь: Арктика",
+        subtitle: "Мурманск ➔ Владивосток",
+        req_rank: 3,
+        difficulty_stars: "★★★ УРОВЕНЬ 3 (СТАРПОМ)",
+        reward_base: 1100,
+        xp_reward: 250,
+        region_desc: "Суровая арктическая экспедиция через Карские Ворота, Ямал, пролив Вилькицкого (77° с.ш.), Чукотку, Берингов пролив и Сахалин.",
+        start_node: "port_murmansk",
+        target_node: "port_vladivostok",
+        camera_center: [64.0, 105.0],
+        camera_zoom: 3,
+        graph: {
+          "port_murmansk": [
+            { target_id: "strait_kara_gates", base_fuel_cost: 16, distance_km: 1150 },
+            { target_id: "trap_svalbard", is_trap: true }
+          ],
+          "strait_kara_gates": [
+            { target_id: "port_sabetta", base_fuel_cost: 14, distance_km: 800 },
+            { target_id: "strait_vilkitsky", base_fuel_cost: 24, distance_km: 1900 }
+          ],
+          "port_sabetta": [{ target_id: "strait_vilkitsky", base_fuel_cost: 16, distance_km: 1250 }],
+          "strait_vilkitsky": [{ target_id: "port_pevek", base_fuel_cost: 21, distance_km: 2100 }],
+          "port_pevek": [{ target_id: "strait_bering", base_fuel_cost: 16, distance_km: 1100 }],
+          "strait_bering": [{ target_id: "port_petropavlovsk", base_fuel_cost: 19, distance_km: 1850 }],
+          "port_petropavlovsk": [{ target_id: "strait_laperouse", base_fuel_cost: 16, distance_km: 1450 }],
+          "strait_laperouse": [
+            { target_id: "port_vladivostok", base_fuel_cost: 14, distance_km: 950 },
+            { target_id: "trap_korea", is_trap: true }
+          ],
+          "port_vladivostok": []
+        }
+      },
+      {
+        contract_id: "cnt_santos_singapore",
+        title: "Южный Крест: В обход каналов",
+        subtitle: "Сантус (Бразилия) ➔ Сингапур",
+        req_rank: 4,
+        difficulty_stars: "★★★★ УРОВЕНЬ 4 (КАПИТАН)",
+        reward_base: 1400,
+        xp_reward: 320,
+        region_desc: "Финальный экзамен штурмана: Южная Атлантика без ориентиров, Тристан-да-Кунья, «Ревущие сороковые» у Кейптауна, Мозамбикский и Зондский проливы.",
+        start_node: "port_santos",
+        target_node: "port_singapore",
+        camera_center: [-18.0, 32.0],
+        camera_zoom: 3,
+        graph: {
+          "port_santos": [
+            { target_id: "island_tristan", base_fuel_cost: 22, distance_km: 3400 },
+            { target_id: "trap_drake", is_trap: true },
+            { target_id: "trap_cape_verde", is_trap: true }
+          ],
+          "island_tristan": [{ target_id: "cape_good_hope", base_fuel_cost: 20, distance_km: 2800 }],
+          "cape_good_hope": [
+            { target_id: "channel_mozambique", base_fuel_cost: 19, distance_km: 2600 },
+            { target_id: "port_port_louis", base_fuel_cost: 25, distance_km: 4100 }
+          ],
+          "channel_mozambique": [
+            { target_id: "port_port_louis", base_fuel_cost: 15, distance_km: 1800 },
+            { target_id: "trap_maldives", is_trap: true }
+          ],
+          "port_port_louis": [
+            { target_id: "strait_sunda", base_fuel_cost: 24, distance_km: 5200 },
+            { target_id: "trap_sunda_detour", is_trap: true }
+          ],
+          "strait_sunda": [{ target_id: "port_singapore", base_fuel_cost: 14, distance_km: 900 }],
+          "port_singapore": []
+        }
+      }
+    ];
+
+    const CHALLENGES = {
+      "strait_hormuz": {
+        mechanic: "pinpoint",
+        prompt: "Курс проложен на Ормузский пролив (вход в Персидский залив). Найдите и отметьте его на слепой карте самостоятельно!",
+        target_coordinates: { lat: 26.566, lng: 56.250 },
+        scoring_radius_km: { perfect: 165, good: 410 },
+        outcomes: { perfect: { cash_bonus: 140 }, good: { cash_bonus: 50 }, fail: {} },
+        lore_fact: "Северный берег Ормузского пролива принадлежит Ирану, а южный — эксклаву Омана на полуострове Мусандам. Через этот пролив идет около 20% мировой морской нефти."
+      },
+      "port_jebel_ali": {
+        mechanic: "border_control",
+        prompt: "Портовый контроль Дубая запрашивает декларацию. Какой особенностью обладает гавань порта Джебель-Али?",
+        options: [
+          { id: "a", text: "Крупнейшая в мире искусственная глубоководная гавань, вырытая в береговом грунте", is_correct: true },
+          { id: "b", text: "Естественный фьорд в устье пустынной реки Руб-эль-Хали", is_correct: false },
+          { id: "c", text: "Плавучий терминал на коралловом атолле в 120 км от берега", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: 0, hp_mod: 0, cash_bonus: 120 }, fail: { fuel_mod: 6, hp_mod: -1, cash_bonus: -40 } },
+        lore_fact: "Гавань Джебель-Али в ОАЭ была целиком вырыта в пустынном грунте в конце 1970-х годов и видна из космоса."
+      },
+      "strait_bab_el_mandeb": {
+        mechanic: "pinpoint",
+        prompt: "Впереди «Врата скорби»! Самостоятельно найдите и укажите на слепой карте Баб-эль-Мандебский пролив (между Красным морем и Аденским заливом).",
+        target_coordinates: { lat: 12.585, lng: 43.333 },
+        scoring_radius_km: { perfect: 165, good: 410 },
+        outcomes: { perfect: { cash_bonus: 150 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Ширина Баб-эль-Мандебского пролива между Йеменом (Азия) и Джибути (Африка) составляет всего около 26 км."
+      },
+      "port_jeddah": {
+        mechanic: "anomaly_choice",
+        prompt: "Красное море — самое соленое в Мировом океане, в него не впадает ни одна постоянная река. Как это повлияет на осадку нашего судна?",
+        options: [
+          {
+            id: "opt_1",
+            text: "Высокая плотность соленой воды сильнее выталкивает корпус вверх (осадка уменьшится). Идем над рифами увереннее.",
+            is_correct: true,
+            effect: { fuel_mod: -4, hp_mod: 0, cash_bonus: 110, title: "Точный расчет закона Архимеда!" }
+          },
+          {
+            id: "opt_2",
+            text: "Соленая вода тяжелее и тянет судно ко дну (осадка увеличится). Сбрасываем балласт.",
+            is_correct: false,
+            effect: { fuel_mod: 9, hp_mod: -1, cash_bonus: 0, title: "Ошибка расчета плавучести!" }
+          }
+        ],
+        lore_fact: "Из-за высокой солености (до 41‰) плотность воды в Красном море заметно выше океанской, поэтому архимедова сила выталкивает судно сильнее."
+      },
+      "canal_suez": {
+        mechanic: "pinpoint",
+        prompt: "Выходим к Синайскому полуострову! Укажите на слепой карте русло Суэцкого канала (между Красным и Средиземным морями).",
+        target_coordinates: { lat: 30.585, lng: 32.265 },
+        scoring_radius_km: { perfect: 165, good: 400 },
+        outcomes: { perfect: { cash_bonus: 160 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Суэцкий канал длиной 193 км не имеет ни одного шлюза — вода течет свободно, так как уровень Красного и Средиземного морей почти одинаков."
+      },
+      "port_piraeus": {
+        mechanic: "border_control",
+        prompt: "Эгейское море. Какой узкий канал в Греции позволяет малотоннажным судам срезать путь из Пирея в Ионическое море, не огибая Пелопоннес?",
+        options: [
+          { id: "p1", text: "Коринфский канал", is_correct: true },
+          { id: "p2", text: "Кильский канал", is_correct: false },
+          { id: "p3", text: "Каледонский канал", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: -3, hp_mod: 0, cash_bonus: 120 }, fail: { fuel_mod: 7, hp_mod: -1, cash_bonus: 0 } },
+        lore_fact: "Коринфский канал прорублен в скале на высоте 79 метров, но его ширина всего 25 метров — современные океанские гиганты туда не помещаются."
+      },
+      "port_istanbul": {
+        mechanic: "pinpoint",
+        prompt: "Финишная прямая! Самостоятельно укажите на слепой карте пролив Босфор (Стамбул), соединяющий Мраморное и Черное моря.",
+        target_coordinates: { lat: 41.008, lng: 28.978 },
+        scoring_radius_km: { perfect: 150, good: 380 },
+        outcomes: { perfect: { cash_bonus: 220 }, good: { cash_bonus: 100 }, fail: {} },
+        lore_fact: "Босфор — самый узкий межконтинентальный пролив Земли (минимальная ширина 700 м) с двумя противоположными по глубине течениями."
+      },
+
+      "strait_oresund": {
+        mechanic: "pinpoint",
+        prompt: "Выход из Балтийского моря! Найдите и укажите на слепой карте пролив Эресунн (между датским островом Зеландия и южной оконечностью Швеции).",
+        target_coordinates: { lat: 55.950, lng: 12.680 },
+        scoring_radius_km: { perfect: 155, good: 370 },
+        outcomes: { perfect: { cash_bonus: 150 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Через пролив Эресунн перекинут знаменитый мост-тоннель между Копенгагеном и Мальмё, который посреди пролива уходит под воду на искусственном острове Пеберхольм."
+      },
+      "canal_kiel": {
+        mechanic: "pinpoint",
+        prompt: "Срезаем путь сквозь основание полуострова Ютландия! Укажите на слепой карте Кильский канал (север Германии, между Балтийским и Северным морями).",
+        target_coordinates: { lat: 54.150, lng: 9.650 },
+        scoring_radius_km: { perfect: 155, good: 370 },
+        outcomes: { perfect: { cash_bonus: 150 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Кильский канал (98 км) — самый загруженный искусственный водный путь в Европе, экономящий судам 460 км штормового пути вокруг Дании."
+      },
+      "port_gothenburg": {
+        mechanic: "border_control",
+        prompt: "Мы идем вокруг Дании через Гётеборг. Какие два пролива последовательно соединяют здесь Балтику с Северным морем?",
+        options: [
+          { id: "gt1", text: "Каттегат и Скагеррак", is_correct: true },
+          { id: "gt2", text: "Босфор и Дарданеллы", is_correct: false },
+          { id: "gt3", text: "Ла-Манш и Па-де-Кале", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: -3, hp_mod: 0, cash_bonus: 130 }, fail: { fuel_mod: 7, hp_mod: -1, cash_bonus: 0 } },
+        lore_fact: "У мыса Скаген встречаются течения проливов Скагеррак и Каттегат — из-за разной плотности соленой воды две волны сталкиваются видимой полосой пены."
+      },
+      "strait_dover": {
+        mechanic: "pinpoint",
+        prompt: "Входим в Ла-Манш! Укажите на слепой карте самое узкое место между Великобританией и континентальной Францией — пролив Па-де-Кале.",
+        target_coordinates: { lat: 51.050, lng: 1.450 },
+        scoring_radius_km: { perfect: 150, good: 360 },
+        outcomes: { perfect: { cash_bonus: 160 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Ширина Па-де-Кале составляет всего 33 км. Через него ежесуточно проходит более 400 грузовых судов."
+      },
+      "port_brest": {
+        mechanic: "anomaly_choice",
+        prompt: "У берегов французской Бретани приливы достигают 13 метров, разгоняя мощные течения среди скал Ируазского моря.",
+        options: [
+          {
+            id: "br1",
+            text: "Дождаться стоячей полной воды (Slack Water) и войти в Брестскую бухту с лоцманом.",
+            is_correct: true,
+            effect: { fuel_mod: -2, hp_mod: 0, cash_bonus: 130, title: "Безопасный заход по полной воде!" }
+          },
+          {
+            id: "br2",
+            text: "Идти напролом в пик отлива против встречного приливного потока.",
+            is_correct: false,
+            effect: { fuel_mod: 11, hp_mod: -1, cash_bonus: 0, title: "Снос к гранитным рифам Уэссана!" }
+          }
+        ],
+        lore_fact: "Воронкообразные заливы Бретани и Нормандии создают одни из самых высоких и быстрых приливов на планете."
+      },
+      "cape_finisterre": {
+        mechanic: "pinpoint",
+        prompt: "Пересекаем бурный Бискайский залив! Найдите и укажите на слепой карте мыс Финистерре (северо-западный выступ Испании / Галисия).",
+        target_coordinates: { lat: 42.882, lng: -9.272 },
+        scoring_radius_km: { perfect: 160, good: 380 },
+        outcomes: { perfect: { cash_bonus: 160 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Римляне называли этот мыс Finis Terrae («Край Земли»), а моряки окрестили берег Галисии Коста-да-Морте из-за атлантических штормов."
+      },
+      "port_lisbon": {
+        mechanic: "border_control",
+        prompt: "Финиш в Лиссабоне! В широком устье какой крупнейшей реки Пиренейского полуострова расположен этот порт?",
+        options: [
+          { id: "ls1", text: "Река Тежу (Тахо)", is_correct: true },
+          { id: "ls2", text: "Река Эбро", is_correct: false },
+          { id: "ls3", text: "Река По", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: 0, hp_mod: 0, cash_bonus: 200 }, fail: { fuel_mod: 6, hp_mod: -1, cash_bonus: 30 } },
+        lore_fact: "Эстуарий реки Тежу образует защищенную внутреннюю бухту Мар-да-Палья, откуда стартовали великие португальские экспедиции XV века."
+      },
+
+      "strait_taiwan": {
+        mechanic: "pinpoint",
+        prompt: "Выходим из Шанхая на юг! Самостоятельно найдите и отметьте на слепой карте Тайваньский (Формозский) пролив.",
+        target_coordinates: { lat: 24.500, lng: 119.500 },
+        scoring_radius_km: { perfect: 165, good: 400 },
+        outcomes: { perfect: { cash_bonus: 160 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Тайваньский пролив соединяет Восточно-Китайское и Южно-Китайское моря и является главной судоходной артерией Восточной Азии."
+      },
+      "port_singapore": {
+        mechanic: "pinpoint",
+        prompt: "Главный морской перекресток Азии! Найдите на слепой карте Сингапур (южная оконечность полуострова Малакка).",
+        target_coordinates: { lat: 1.264, lng: 103.840 },
+        scoring_radius_km: { perfect: 165, good: 410 },
+        outcomes: { perfect: { cash_bonus: 200 }, good: { cash_bonus: 80 }, fail: {} },
+        lore_fact: "В районе Сингапура судоходный фарватер сужается до 2,8 км — здесь проходит более трети всей мировой морской торговли."
+      },
+      "port_colombo": {
+        mechanic: "border_control",
+        prompt: "Почему гигантские контейнеровозы всегда огибают Шри-Ланку с юга через Коломбо, а не идут напрямик между Индией и Шри-Ланкой?",
+        options: [
+          { id: "cl1", text: "Полкский пролив перегорожен цепью отмелей «Адамов мост» с глубиной всего 1–4 метра", is_correct: true },
+          { id: "cl2", text: "Пролив наглухо перекрыт дамбой гидроэлектростанции", is_correct: false },
+          { id: "cl3", text: "Там бушует постоянный водоворот", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: -4, hp_mod: 0, cash_bonus: 150 }, fail: { fuel_mod: 8, hp_mod: -1, cash_bonus: 0 } },
+        lore_fact: "Цепь известняковых отмелей Рама-Сету («Адамов мост») длиной 48 км делает прямой проход между Индией и Шри-Ланкой невозможным для крупных судов."
+      },
+      "strait_gibraltar": {
+        mechanic: "pinpoint",
+        prompt: "Выход из Средиземного моря в Атлантику! Самостоятельно найдите и укажите на слепой карте Гибралтарский пролив.",
+        target_coordinates: { lat: 35.966, lng: -5.498 },
+        scoring_radius_km: { perfect: 155, good: 380 },
+        outcomes: { perfect: { cash_bonus: 170 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Ширина Гибралтара в самом узком месте — всего 14 км. Из-за испарения Средиземного моря поверхностное течение здесь всегда идет из Атлантики на восток."
+      },
+      "port_rotterdam": {
+        mechanic: "border_control",
+        prompt: "Финиш в Роттердаме — крупнейшем порту Европы! В дельте каких двух рек он расположен?",
+        options: [
+          { id: "rt1", text: "Рейн и Маас", is_correct: true },
+          { id: "rt2", text: "Эльба и Везер", is_correct: false },
+          { id: "rt3", text: "Сена и Луара", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: 0, hp_mod: 0, cash_bonus: 250 }, fail: { fuel_mod: 6, hp_mod: -1, cash_bonus: 40 } },
+        lore_fact: "Роттердам связывает океанские контейнерные линии с речной сетью Рейна, снабжая грузами Германию, Бенилюкс и Швейцарию."
+      },
+
+      "port_callao": {
+        mechanic: "anomaly_choice",
+        prompt: "Идем на север вдоль побережья Чили и Перу. Какое мощное океаническое течение здесь господствует?",
+        options: [
+          {
+            id: "pe1",
+            text: "Холодное Перуанское течение (Гумбольдта) несет воды с юга на север — используем попутный поток!",
+            is_correct: true,
+            effect: { fuel_mod: -5, hp_mod: 0, cash_bonus: 140, title: "Попутное течение Гумбольдта экономит мазут!" }
+          },
+          {
+            id: "pe2",
+            text: "Теплое течение Гольфстрим идет с севера на юг — уходим далеко в океан.",
+            is_correct: false,
+            effect: { fuel_mod: 11, hp_mod: -1, cash_bonus: 0, title: "Лишний крюк против географии!" }
+          }
+        ],
+        lore_fact: "Холодное Перуанское течение блокирует дождевые облака (создавая пустыню Атакама), но поднимает со дна планктон для богатейших рыбных промыслов."
+      },
+      "arch_galapagos": {
+        mechanic: "pinpoint",
+        prompt: "Контрольная точка в Тихом океане! Самостоятельно укажите на слепой карте Галапагосские острова (на линии экватора к западу от Эквадора).",
+        target_coordinates: { lat: -0.740, lng: -90.310 },
+        scoring_radius_km: { perfect: 220, good: 490 },
+        outcomes: { perfect: { cash_bonus: 170 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Благодаря холодному течению Гумбольдта на Галапагосских островах прямо на экваторе обитают пингвины."
+      },
+      "canal_panama": {
+        mechanic: "pinpoint",
+        prompt: "Переход из Тихого океана в Атлантический! Укажите на слепой карте самое узкое место Центральной Америки — Панамский канал.",
+        target_coordinates: { lat: 9.080, lng: -79.680 },
+        scoring_radius_km: { perfect: 165, good: 400 },
+        outcomes: { perfect: { cash_bonus: 170 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Система шлюзов Панамского канала поднимает суда на высоту 26 метров над уровнем океана в искусственное пресноводное озеро Гатун."
+      },
+      "port_kingston": {
+        mechanic: "border_control",
+        prompt: "Порт Кингстон — главный перевалочный хаб Карибского моря. На каком острове он расположен?",
+        options: [
+          { id: "kg1", text: "Ямайка", is_correct: true },
+          { id: "kg2", text: "Гаити", is_correct: false },
+          { id: "kg3", text: "Пуэрто-Рико", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: -3, hp_mod: 0, cash_bonus: 130 }, fail: { fuel_mod: 7, hp_mod: -1, cash_bonus: 0 } },
+        lore_fact: "Бухта Кингстона защищена длинной песчаной косой Палисадос, на конце которой стоял пиратский город Порт-Ройял."
+      },
+      "strait_yucatan": {
+        mechanic: "pinpoint",
+        prompt: "Входим в Мексиканский залив! Найдите и укажите на слепой карте Юкатанский пролив (между полуостровом Юкатан и западом Кубы).",
+        target_coordinates: { lat: 21.750, lng: -85.830 },
+        scoring_radius_km: { perfect: 165, good: 400 },
+        outcomes: { perfect: { cash_bonus: 160 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Через Юкатанский пролив в Мексиканский залив врывается мощное течение, дающее начало Гольфстриму."
+      },
+      "port_new_orleans": {
+        mechanic: "border_control",
+        prompt: "Финиш в Новом Орлеане! Почему этот порт критически важен для экспорта зерна и аграрного сырья США?",
+        options: [
+          { id: "no1", text: "Он стоит в устье речной системы Миссисипи — Миссури, соединяющей 31 штат с океаном", is_correct: true },
+          { id: "no2", text: "Это единственный незамерзающий порт восточного побережья США", is_correct: false },
+          { id: "no3", text: "Через него проходит грузовой канал в Калифорнию", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: 0, hp_mod: 0, cash_bonus: 220 }, fail: { fuel_mod: 6, hp_mod: -1, cash_bonus: 40 } },
+        lore_fact: "Речные баржи по Миссисипи свозят сою и кукурузу со всего Среднего Запада США прямо к океанским балкерам в Луизиане."
+      },
+
+      "strait_luzon": {
+        mechanic: "pinpoint",
+        prompt: "Курс из Японии в Юго-Восточную Азию! Найдите на слепой карте Лусонский пролив (между югом Тайваня и филиппинским островом Лусон).",
+        target_coordinates: { lat: 20.350, lng: 121.300 },
+        scoring_radius_km: { perfect: 175, good: 420 },
+        outcomes: { perfect: { cash_bonus: 160 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "По дну Лусонского пролива проложены главные подводные интернет-кабели Азии, подверженные частым подводным землетрясениям."
+      },
+      "port_manila": {
+        mechanic: "border_control",
+        prompt: "Швартуемся в Маниле. На каком крупнейшем острове Филиппинского архипелага расположена столица страны?",
+        options: [
+          { id: "mn1", text: "Остров Лусон", is_correct: true },
+          { id: "mn2", text: "Остров Минданао", is_correct: false },
+          { id: "mn3", text: "Остров Сулавеси", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: -3, hp_mod: 0, cash_bonus: 140 }, fail: { fuel_mod: 6, hp_mod: -1, cash_bonus: 0 } },
+        lore_fact: "Манильская бухта — одна из лучших закрытых природных гаваней мира; 250 лет отсюда ходили знаменитые «Манильские галеоны» в Мексику."
+      },
+      "strait_makassar": {
+        mechanic: "pinpoint",
+        prompt: "Идем сквозь Индонезийский архипелаг! Укажите на слепой карте глубоководный Макасарский пролив (между гигантским островом Калимантан/Борнео и островом Сулавеси).",
+        target_coordinates: { lat: -1.850, lng: 118.250 },
+        scoring_radius_km: { perfect: 185, good: 430 },
+        outcomes: { perfect: { cash_bonus: 170 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Прямо по Макасарскому проливу проходит биогеографическая «Линия Уоллеса», разделяющая азиатскую фауну (слоны, тигры) и австралийскую (сумчатые)."
+      },
+      "strait_torres": {
+        mechanic: "pinpoint",
+        prompt: "Внимание, коралловый лабиринт! Найдите на слепой карте Торресов пролив (между островом Новая Гвинея и самым северным мысом Австралии — Кейп-Йорк).",
+        target_coordinates: { lat: -10.350, lng: 142.200 },
+        scoring_radius_km: { perfect: 180, good: 430 },
+        outcomes: { perfect: { cash_bonus: 180 }, good: { cash_bonus: 70 }, fail: {} },
+        lore_fact: "Торресов пролив насчитывает более 270 островов и коралловых рифов при минимальной глубине судового хода всего 12 метров."
+      },
+      "port_brisbane": {
+        mechanic: "anomaly_choice",
+        prompt: "Идем вдоль северо-восточного побережья Австралии. Вдоль берега на 2300 км тянется Большой Барьерный риф.",
+        options: [
+          {
+            id: "bb1",
+            text: "Идти по защищенному внутреннему фарватеру под контролем REEFVTS, прикрываясь рифом от океанской зыби.",
+            is_correct: true,
+            effect: { fuel_mod: -3, hp_mod: 0, cash_bonus: 150, title: "Безопасная проводка вдоль рифа!" }
+          },
+          {
+            id: "bb2",
+            text: "Срезать путь напрямик поперек коралловой гряды вне створов.",
+            is_correct: false,
+            effect: { fuel_mod: 12, hp_mod: -1, cash_bonus: -80, title: "Удар килем о коралловую банку!" }
+          }
+        ],
+        lore_fact: "Большой Барьерный риф — крупнейшая на Земле структура, созданная живыми организмами, она работает как природный волнолом для берегов Квинсленда."
+      },
+      "port_sydney": {
+        mechanic: "border_control",
+        prompt: "Финиш в Сиднее! В каком заливе расположены Сиднейский оперный театр и мост Харбор-Бридж?",
+        options: [
+          { id: "sy1", text: "Залив Порт-Джексон (Тасманово море)", is_correct: true },
+          { id: "sy2", text: "Большой Австралийский залив", is_correct: false },
+          { id: "sy3", text: "Залив Карпентария", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: 0, hp_mod: 0, cash_bonus: 240 }, fail: { fuel_mod: 5, hp_mod: -1, cash_bonus: 40 } },
+        lore_fact: "Гавань Порт-Джексон представляет собой затопленную речную долину (риас) с изрезанной береговой линией длиной более 300 км."
+      },
+
+      "strait_kara_gates": {
+        mechanic: "pinpoint",
+        prompt: "Входим в арктическое Карское море! Укажите на слепой карте пролив Карские Ворота (между югом архипелага Новая Земля и островом Вайгач).",
+        target_coordinates: { lat: 70.450, lng: 58.050 },
+        scoring_radius_km: { perfect: 200, good: 460 },
+        outcomes: { perfect: { cash_bonus: 170 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Мурманск не замерзает благодаря теплому Северо-Атлантическому течению, но сразу за Новой Землей — за Карскими Воротами — начинаются тяжелые льды."
+      },
+      "port_sabetta": {
+        mechanic: "anomaly_choice",
+        prompt: "Обская губа (полуостров Ямал). Мороз -32°C, штормовые брызги вызывают стремительное обледенение палубы и контейнеров!",
+        options: [
+          {
+            id: "sb1",
+            text: "Снизить ход, изменить курсовой угол к волне и включить паровую систему антиобледенения.",
+            is_correct: true,
+            effect: { fuel_mod: 2, hp_mod: 0, cash_bonus: 150, title: "Остойчивость судна сохранена!" }
+          },
+          {
+            id: "sb2",
+            text: "Дать полный ход против волны, чтобы быстрее проскочить Обскую губу.",
+            is_correct: false,
+            effect: { fuel_mod: 11, hp_mod: -1, cash_bonus: -50, title: "Тонны льда на палубе нарушили центровку!" }
+          }
+        ],
+        lore_fact: "Обледенение надстроек высоко над ватерлинией резко поднимает центр тяжести судна и может привести к опрокидыванию."
+      },
+      "strait_vilkitsky": {
+        mechanic: "pinpoint",
+        prompt: "Самая северная точка всей континентальной Евразии (77° с.ш.)! Найдите и укажите на слепой карте пролив Вилькицкого (мыс Челюскин на полуострове Таймыр).",
+        target_coordinates: { lat: 77.950, lng: 103.500 },
+        scoring_radius_km: { perfect: 230, good: 510 },
+        outcomes: { perfect: { cash_bonus: 210 }, good: { cash_bonus: 80 }, fail: {} },
+        lore_fact: "Пролив Вилькицкого соединяет Карское море и море Лаптевых и часто забит многолетними льдами даже в августе."
+      },
+      "port_pevek": {
+        mechanic: "border_control",
+        prompt: "Певек — самый северный город России. Какой уникальный энергетический объект работает в его акватории?",
+        options: [
+          { id: "pv1", text: "Первая в мире плавучая атомная теплоэлектростанция (ПАТЭС) «Академик Ломоносов»", is_correct: true },
+          { id: "pv2", text: "Приливная дамба через весь Чаунский залив", is_correct: false },
+          { id: "pv3", text: "Крупнейшая солнечная электростанция Заполярья", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: -3, hp_mod: 0, cash_bonus: 160 }, fail: { fuel_mod: 7, hp_mod: -1, cash_bonus: 0 } },
+        lore_fact: "Плавучая АЭС обеспечивает теплом и электричеством Певек и горнорудные предприятия Чукотки."
+      },
+      "strait_bering": {
+        mechanic: "pinpoint",
+        prompt: "Выходим из Ледовитого океана в Тихий! Найдите на слепой карте восточную оконечность Чукотки (подход к Берингову проливу).",
+        target_coordinates: { lat: 65.500, lng: 178.900 },
+        scoring_radius_km: { perfect: 220, good: 490 },
+        outcomes: { perfect: { cash_bonus: 190 }, good: { cash_bonus: 70 }, fail: {} },
+        lore_fact: "В Беринговом проливе расстояние между островом Ратманова (РФ) и островом Крузенштерна (США) составляет всего 3,8 км, а между ними проходит линия перемены дат."
+      },
+      "port_petropavlovsk": {
+        mechanic: "border_control",
+        prompt: "Бункеровка в Петропавловске-Камчатском. В какой гигантской незамерзающей бухте расположен этот порт?",
+        options: [
+          { id: "pk1", text: "Авачинская губа", is_correct: true },
+          { id: "pk2", text: "Анадырский лиман", is_correct: false },
+          { id: "pk3", text: "Пенжинская губа", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: -4, hp_mod: 0, cash_bonus: 150 }, fail: { fuel_mod: 7, hp_mod: -1, cash_bonus: 0 } },
+        lore_fact: "Авачинская губа окружена вулканами и надежно защищает суда от океанских цунами и тайфунов."
+      },
+      "strait_laperouse": {
+        mechanic: "pinpoint",
+        prompt: "Переход из Охотского моря в Японское! Самостоятельно укажите на слепой карте пролив Лаперуза (между югом Сахалина и японским Хоккайдо).",
+        target_coordinates: { lat: 45.720, lng: 142.020 },
+        scoring_radius_km: { perfect: 175, good: 410 },
+        outcomes: { perfect: { cash_bonus: 170 }, good: { cash_bonus: 60 }, fail: {} },
+        lore_fact: "Ширина пролива Лаперуза — 43 км. В отличие от мелкого Татарского пролива, он позволяет крупнотоннажным судам быстро проходить к Владивостоку."
+      },
+      "port_vladivostok": {
+        mechanic: "border_control",
+        prompt: "Финиш Северного морского пути во Владивостоке! Какой вантовый мост встречает суда в проливе Босфор Восточный?",
+        options: [
+          { id: "vl1", text: "Русский мост (соединяет полуостров Назимова с островом Русский)", is_correct: true },
+          { id: "vl2", text: "Крымский мост", is_correct: false },
+          { id: "vl3", text: "Мост Акаси-Кайкё", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: 0, hp_mod: 0, cash_bonus: 300 }, fail: { fuel_mod: 6, hp_mod: -1, cash_bonus: 50 } },
+        lore_fact: "Северный морской путь из Мурманска на Дальний Восток почти вдвое короче южного маршрута через Суэцкий канал (~10 500 км против ~21 000 км)."
+      },
+
+      "island_tristan": {
+        mechanic: "pinpoint",
+        prompt: "Открытая Южная Атлантика (37° ю.ш.)! Укажите на слепой карте архипелаг Тристан-да-Кунья — на полпути между Бразилией и Южной Африкой.",
+        target_coordinates: { lat: -37.105, lng: -12.277 },
+        scoring_radius_km: { perfect: 250, good: 550 },
+        outcomes: { perfect: { cash_bonus: 190 }, good: { cash_bonus: 70 }, fail: {} },
+        lore_fact: "Тристан-да-Кунья — самый удаленный от материков населенный архипелаг на Земле (более 2400 км до ближайшей суши)."
+      },
+      "cape_good_hope": {
+        mechanic: "anomaly_choice",
+        prompt: "Огибаем южную Африку. Теплое течение Агульяс сталкивается со встречным штормом «Ревущих сороковых», рождая 25-метровые «волны-убийцы»!",
+        options: [
+          {
+            id: "cg1",
+            text: "Сместиться ближе к континентальному шельфу (глубина до 200 м), выйдя из стержня течения Агульяс.",
+            is_correct: true,
+            effect: { fuel_mod: 2, hp_mod: 0, cash_bonus: 190, title: "Грамотный обход течения Агульяс!" }
+          },
+          {
+            id: "cg2",
+            text: "Идти прямо по стержню течения Агульяс навстречу западным штормам.",
+            is_correct: false,
+            effect: { fuel_mod: 13, hp_mod: -1, cash_bonus: -60, title: "Аномальная волна-убийца повредила носовые контейнеры!" }
+          }
+        ],
+        lore_fact: "Настоящая самая южная точка Африки и граница двух океанов — мыс Игольный (Агульяс), расположенный на 155 км юго-восточнее мыса Доброй Надежды."
+      },
+      "channel_mozambique": {
+        mechanic: "pinpoint",
+        prompt: "Курс между Африкой и Мадагаскаром! Самостоятельно укажите на слепой карте Мозамбикский пролив (самый длинный пролив в мире — 1760 км).",
+        target_coordinates: { lat: -17.000, lng: 41.500 },
+        scoring_radius_km: { perfect: 210, good: 470 },
+        outcomes: { perfect: { cash_bonus: 180 }, good: { cash_bonus: 70 }, fail: {} },
+        lore_fact: "Мозамбикский пролив — главная трасса для гигантских супертанкеров класса ULCC, которые по осадке не помещаются в Суэцкий канал."
+      },
+      "port_port_louis": {
+        mechanic: "border_control",
+        prompt: "Заходим на бункеровку в Порт-Луи (Маврикий). В какую островную группу Индийского океана входит Маврикий вместе с Реюньоном?",
+        options: [
+          { id: "pl1", text: "Маскаренские острова", is_correct: true },
+          { id: "pl2", text: "Мальдивские атоллы", is_correct: false },
+          { id: "pl3", text: "Азорские острова", is_correct: false }
+        ],
+        outcomes: { success: { fuel_mod: -3, hp_mod: 0, cash_bonus: 160 }, fail: { fuel_mod: 8, hp_mod: -1, cash_bonus: 0 } },
+        lore_fact: "Маврикий веками служил ключевой стоянкой для судов Ост-Индских компаний на пути вокруг Африки в Индию и Индонезию."
+      },
+      "strait_sunda": {
+        mechanic: "pinpoint",
+        prompt: "Финальный прорыв в Юго-Восточную Азию! Самостоятельно найдите и укажите на слепой карте Зондский пролив (между индонезийскими островами Суматра и Ява, где стоит вулкан Кракатау).",
+        target_coordinates: { lat: -5.922, lng: 105.850 },
+        scoring_radius_km: { perfect: 165, good: 390 },
+        outcomes: { perfect: { cash_bonus: 230 }, good: { cash_bonus: 90 }, fail: {} },
+        lore_fact: "Зондский пролив разделяет Суматру и Яву. Посреди пролива возвышается действующий вулкан Анак-Кракатау («Дитя Кракатау»)."
+      }
+    };
+
+    // =========================================================================
+    // 2. ПРОФИЛЬ ИГРОКА И СОСТОЯНИЕ СЕССИИ
+    // =========================================================================
+    const DEFAULT_PROFILE = {
+      bank: 400,
+      xp: 0,
+      upgrades: { tank: 0, hull: 0, radar: 0, engine: 0 },
+      completed: {},
+      atlas: []
+    };
+
+    let playerProfile = loadProfile();
+    let selectedCargoId = "standard";
+    let selectedContractId = "cnt_mumbai_istanbul";
+
+    function loadProfile() {
+      try {
+        const raw = localStorage.getItem("geo_logist_pro_save_v3");
+        if (!raw) return JSON.parse(JSON.stringify(DEFAULT_PROFILE));
+        const parsed = JSON.parse(raw);
+        return {
+          bank: typeof parsed.bank === "number" ? parsed.bank : 400,
+          xp: typeof parsed.xp === "number" ? parsed.xp : 0,
+          upgrades: { ...DEFAULT_PROFILE.upgrades, ...(parsed.upgrades || {}) },
+          completed: parsed.completed || {},
+          atlas: Array.isArray(parsed.atlas) ? parsed.atlas : []
+        };
+      } catch (e) {
+        return JSON.parse(JSON.stringify(DEFAULT_PROFILE));
+      }
+    }
+
+    function saveProfile() {
+      localStorage.setItem("geo_logist_pro_save_v3", JSON.stringify(playerProfile));
+    }
+
+    function getCaptainRankInfo() {
+      const xp = playerProfile.xp;
+      if (xp >= 900) return { rank: 4, title: "Капитан" };
+      if (xp >= 450) return { rank: 3, title: "Старпом" };
+      if (xp >= 180) return { rank: 2, title: "Штурман" };
+      return { rank: 1, title: "Кадет" };
+    }
+
+    function getShipSpecs() {
+      return {
+        maxFuel: UPGRADE_DEFS.tank.values[playerProfile.upgrades.tank],
+        maxHp: UPGRADE_DEFS.hull.values[playerProfile.upgrades.hull],
+        radarMult: UPGRADE_DEFS.radar.values[playerProfile.upgrades.radar],
+        engineMult: UPGRADE_DEFS.engine.values[playerProfile.upgrades.engine]
+      };
+    }
+
+    let map;
+    let mapLayers = { vectorGroup: null, satelliteTile: null, radarTile: null };
+    let routePolylines = [];
+    let activeMapMarkers = [];
+    let pinpointLayerGroup;
+
+    let isNavCollapsed = false;
+    let isChCollapsed = false;
+
+    let challengeTimerInterval = null;
+    let challengeSecondsLeft = 18;
+
+    let gameState = {
+      phase: "NAVIGATION",
+      contract: null,
+      cargo: null,
+      specs: null,
+      currentNodeId: "port_mumbai",
+      visitedNodes: ["port_mumbai"],
+      fuel: 95,
+      maxFuel: 95,
+      hp: 3,
+      maxHp: 3,
+      runCash: 250,
+      distanceKm: 0,
+      streak: 0,
+      sonarUsedThisTurn: false,
+      brokerUsedThisTurn: false,
+      activeChallengeNodeId: null,
+      activeTransitionCost: 0,
+      activeTransitionDist: 0,
+      awaitingPinpointClick: false
+    };
+
+    // =========================================================================
+    // 3. ИНИЦИАЛИЗАЦИЯ КАРТЫ (БЕЗ АТРИБУЦИИ И БЕЗ ФЛАГА)
+    // =========================================================================
+    async function initMap() {
+      map = L.map('map', {
+        center: [25.0, 48.0],
+        zoom: 4,
+        minZoom: 2,
+        maxZoom: 8,
+        zoomControl: false,
+        attributionControl: false, // Полностью отключен блок атрибуции
+        worldCopyJump: true
+      });
+
+      mapLayers.satelliteTile = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 17 }
+      );
+
+      mapLayers.radarTile = L.tileLayer(
+        'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+        { maxZoom: 16 }
+      );
+
+      mapLayers.vectorGroup = L.layerGroup().addTo(map);
+      buildTacticalGrid(mapLayers.vectorGroup);
+      await loadWorldVectorBoundaries(mapLayers.vectorGroup);
+
+      pinpointLayerGroup = L.layerGroup().addTo(map);
+
+      map.on('click', onMapClickForPinpoint);
+    }
+
+    function buildTacticalGrid(targetGroup) {
+      const gridStyle = {
+        color: '#1e293b',
+        weight: 1,
+        opacity: 0.55,
+        dashArray: '4, 6',
+        interactive: false
+      };
+      for (let lat = -60; lat <= 80; lat += 15) {
+        L.polyline([[lat, -180], [lat, 180]], gridStyle).addTo(targetGroup);
+      }
+      for (let lng = -180; lng <= 180; lng += 15) {
+        L.polyline([[-80, lng], [85, lng]], gridStyle).addTo(targetGroup);
+      }
+      L.polyline([[0, -180], [0, 180]], {
+        color: '#0ea5e9',
+        weight: 1,
+        opacity: 0.3,
+        dashArray: '8, 8',
+        interactive: false
+      }).addTo(targetGroup);
+    }
+
+    async function loadWorldVectorBoundaries(targetGroup) {
+      try {
+        const res = await fetch('https://cdn.jsdelivr.net/npm/world-atlas@2/countries-110m.json');
+        const topoData = await res.json();
+        const geojsonData = topojson.feature(topoData, topoData.objects.countries);
+
+        L.geoJSON(geojsonData, {
+          interactive: false,
+          style: {
+            fillColor: '#132035',
+            fillOpacity: 0.95,
+            color: '#2dd4bf',
+            weight: 0.9,
+            opacity: 0.45
+          }
+        }).addTo(targetGroup);
+      } catch (err) {
+        setMapStyle('radar');
+      }
+    }
+
+    function setMapStyle(styleName) {
+      if (map.hasLayer(mapLayers.vectorGroup)) map.removeLayer(mapLayers.vectorGroup);
+      if (map.hasLayer(mapLayers.satelliteTile)) map.removeLayer(mapLayers.satelliteTile);
+      if (map.hasLayer(mapLayers.radarTile)) map.removeLayer(mapLayers.radarTile);
+
+      if (styleName === 'vector') {
+        mapLayers.vectorGroup.addTo(map);
+      } else if (styleName === 'satellite') {
+        mapLayers.satelliteTile.addTo(map);
+      } else if (styleName === 'radar') {
+        mapLayers.radarTile.addTo(map);
+        mapLayers.vectorGroup.addTo(map);
+      }
+
+      ['vector', 'satellite', 'radar'].forEach(mode => {
+        const btn = document.getElementById(`layer-btn-${mode}`);
+        if (mode === styleName) {
+          btn.className = "px-1.5 sm:px-2 py-1 rounded-md text-[10px] sm:text-[11px] font-semibold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 transition";
+        } else {
+          btn.className = "px-1.5 sm:px-2 py-1 rounded-md text-[10px] sm:text-[11px] font-semibold text-slate-400 hover:text-white transition";
+        }
+      });
+    }
+
+    // Функции сворачивания шторок для мобильных экранов
+    function toggleNavDrawerCollapse() {
+      const body = document.getElementById('nav-drawer-body');
+      const btn = document.getElementById('nav-collapse-btn');
+      isNavCollapsed = !isNavCollapsed;
+      if (isNavCollapsed) {
+        body.classList.add('hidden');
+        btn.textContent = "Развернуть ▲";
+      } else {
+        body.classList.remove('hidden');
+        btn.textContent = "Свернуть ▼";
+      }
+    }
+
+    function toggleChallengeDrawerCollapse() {
+      const body = document.getElementById('ch-drawer-body');
+      const btn = document.getElementById('ch-collapse-btn');
+      isChCollapsed = !isChCollapsed;
+      if (isChCollapsed) {
+        body.classList.add('hidden');
+        btn.textContent = "▲";
+      } else {
+        body.classList.remove('hidden');
+        btn.textContent = "▼";
+      }
+    }
+
+    // =========================================================================
+    // 4. ЗАПУСК РЕЙСА И ОТРИСОВКА КАРТЫ
+    // =========================================================================
+    function startContract(contractId, cargoId) {
+      selectedContractId = contractId || selectedContractId;
+      selectedCargoId = cargoId || selectedCargoId;
+
+      const contract = CONTRACTS.find(c => c.contract_id === selectedContractId);
+      const cargo = CARGO_TYPES.find(cg => cg.id === selectedCargoId);
+      const specs = getShipSpecs();
+
+      gameState = {
+        phase: "NAVIGATION",
+        contract: contract,
+        cargo: cargo,
+        specs: specs,
+        currentNodeId: contract.start_node,
+        visitedNodes: [contract.start_node],
+        fuel: specs.maxFuel,
+        maxFuel: specs.maxFuel,
+        hp: specs.maxHp,
+        maxHp: specs.maxHp,
+        runCash: 250,
+        distanceKm: 0,
+        streak: 0,
+        sonarUsedThisTurn: false,
+        brokerUsedThisTurn: false,
+        activeChallengeNodeId: null,
+        activeTransitionCost: 0,
+        activeTransitionDist: 0,
+        awaitingPinpointClick: false
+      };
+
+      stopChallengeTimer();
+      document.getElementById('map').classList.remove('crosshair-cursor');
+      pinpointLayerGroup.clearLayers();
+
+      const chDrawer = document.getElementById('challenge-drawer');
+      chDrawer.classList.add('hidden');
+      chDrawer.classList.remove('flex');
+
+      document.getElementById('endgame-modal').classList.add('hidden');
+      document.getElementById('endgame-modal').classList.remove('flex');
+      closeHubModal();
+
+      map.flyTo(contract.camera_center, contract.camera_zoom, { duration: 1.0 });
+
+      updateHUD();
+      renderMapProgressOnly();
+      renderNavigationChoices();
+    }
+
+    function restartCurrentContract() {
+      startContract(selectedContractId, selectedCargoId);
+    }
+
+    function clearAllMapOverlays() {
+      routePolylines.forEach(line => map.removeLayer(line));
+      routePolylines = [];
+
+      activeMapMarkers.forEach(m => {
+        if (m.getTooltip()) m.closeTooltip();
+        m.unbindTooltip();
+        map.removeLayer(m);
+      });
+      activeMapMarkers = [];
+
+      const tooltipPane = map.getPane('tooltipPane');
+      if (tooltipPane) tooltipPane.innerHTML = '';
+    }
+
+    function renderMapProgressOnly() {
+      clearAllMapOverlays();
+
+      for (let i = 0; i < gameState.visitedNodes.length - 1; i++) {
+        const fromNode = WORLD_NODES[gameState.visitedNodes[i]];
+        const toNode = WORLD_NODES[gameState.visitedNodes[i + 1]];
+        const line = L.polyline([fromNode.coords, toNode.coords], {
+          color: '#10b981',
+          weight: 3.5,
+          opacity: 0.9,
+          interactive: false
+        }).addTo(map);
+        routePolylines.push(line);
+
+        const dotIcon = L.divIcon({
+          html: `<div class="w-3 h-3 rounded-full bg-emerald-500 border border-emerald-200"></div>`,
+          className: 'flex items-center justify-center',
+          iconSize: [12, 12],
+          iconAnchor: [6, 6]
+        });
+        const dotMarker = L.marker(fromNode.coords, { icon: dotIcon, interactive: false }).addTo(map);
+        activeMapMarkers.push(dotMarker);
+      }
+
+      const currentNode = WORLD_NODES[gameState.currentNodeId];
+      const shipIcon = L.divIcon({
+        html: `
+          <div class="ship-marker-anim w-8 h-8 sm:w-9 sm:h-9 rounded-full bg-emerald-500 border-2 border-white shadow-lg shadow-emerald-500/50 flex items-center justify-center text-sm sm:text-base">
+            🚢
+          </div>`,
+        className: 'flex items-center justify-center',
+        iconSize: [34, 34],
+        iconAnchor: [17, 17]
+      });
+      const shipMarker = L.marker(currentNode.coords, { icon: shipIcon, interactive: false }).addTo(map);
+      shipMarker.bindTooltip(`📍 Вы здесь: ${currentNode.name}`, {
+        permanent: false,
+        direction: 'top',
+        offset: [0, -14],
+        className: 'tactical-tooltip'
+      });
+      activeMapMarkers.push(shipMarker);
+
+      if (gameState.currentNodeId !== gameState.contract.target_node) {
+        const targetNode = WORLD_NODES[gameState.contract.target_node];
+        const finishIcon = L.divIcon({
+          html: `
+            <div class="w-7 h-7 sm:w-8 sm:h-8 rounded-full bg-sky-500/30 border-2 border-sky-400 flex items-center justify-center text-xs sm:text-sm shadow-lg shadow-sky-500/40">
+              🏁
+            </div>`,
+          className: 'flex items-center justify-center',
+          iconSize: [30, 30],
+          iconAnchor: [15, 15]
+        });
+        const finishMarker = L.marker(targetNode.coords, { icon: finishIcon, interactive: false }).addTo(map);
+        finishMarker.bindTooltip(`🏁 Цель: ${targetNode.name}`, {
+          permanent: true,
+          direction: 'top',
+          offset: [0, -14],
+          className: 'tactical-tooltip'
+        });
+        activeMapMarkers.push(finishMarker);
+      }
+    }
+
+    // =========================================================================
+    // 5. ПАНЕЛЬ ВЫБОРА КУРСА
+    // =========================================================================
+    function shuffleArray(arr) {
+      const copy = [...arr];
+      for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+      }
+      return copy;
+    }
+
+    function renderNavigationChoices() {
+      const choicesDrawer = document.getElementById('nav-choices-drawer');
+      const listContainer = document.getElementById('nav-choices-list');
+
+      if (gameState.phase !== "NAVIGATION") {
+        choicesDrawer.classList.add('hidden');
+        return;
+      }
+
+      // При новом ходе разворачиваем шторку, если она была свернута
+      isNavCollapsed = false;
+      document.getElementById('nav-drawer-body').classList.remove('hidden');
+      document.getElementById('nav-collapse-btn').textContent = "Свернуть ▼";
+
+      const rawOptions = gameState.contract.graph[gameState.currentNodeId] || [];
+      if (rawOptions.length === 0) {
+        choicesDrawer.classList.add('hidden');
+        return;
+      }
+
+      const currentNode = WORLD_NODES[gameState.currentNodeId];
+      const targetNode = WORLD_NODES[gameState.contract.target_node];
+      document.getElementById('nav-context-hint').innerHTML =
+        `Позиция: <b class="text-white">${currentNode.name}</b> • Курс назначения: <b class="text-sky-400">${targetNode.name}</b>`;
+
+      const shuffled = shuffleArray(rawOptions);
+      listContainer.innerHTML = '';
+
+      shuffled.forEach((conn, idx) => {
+        const isTrap = !!conn.is_trap;
+        const nodeInfo = isTrap ? TRAP_NODES[conn.target_id] : WORLD_NODES[conn.target_id];
+
+        const btn = document.createElement('button');
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          if (isTrap) {
+            triggerTrapPenalty(conn.target_id);
+          } else {
+            const discountedFuel = Math.max(4, Math.round(conn.base_fuel_cost * gameState.specs.engineMult));
+            initiateMoveToNode(conn.target_id, discountedFuel, conn.distance_km);
+          }
+        };
+
+        btn.className = 'p-2.5 sm:p-3 rounded-xl border bg-slate-900/95 hover:bg-slate-800 border-slate-700/90 hover:border-emerald-400 text-left transition flex items-center justify-between gap-2.5 group cursor-pointer shadow-md';
+
+        btn.innerHTML = `
+          <div class="flex items-center gap-2.5 min-w-0">
+            <span class="w-6 h-6 sm:w-7 sm:h-7 shrink-0 rounded-lg bg-slate-800 border border-slate-700 group-hover:bg-emerald-500 group-hover:text-slate-950 font-bold text-[11px] mono flex items-center justify-center transition">
+              #${idx + 1}
+            </span>
+            <div class="min-w-0">
+              <div class="text-xs sm:text-sm font-bold text-white group-hover:text-emerald-300 transition truncate">
+                ${nodeInfo.name}
+              </div>
+              <div class="text-[10px] sm:text-[11px] text-slate-400">
+                Тип: <span class="text-slate-300 font-medium">${nodeInfo.tag}</span>
+              </div>
+            </div>
+          </div>
+          <span class="text-[11px] sm:text-xs font-bold text-emerald-400 group-hover:translate-x-0.5 transition shrink-0">
+            Курс →
+          </span>
+        `;
+        listContainer.appendChild(btn);
+      });
+
+      choicesDrawer.classList.remove('hidden');
+    }
+
+    function triggerTrapPenalty(trapId) {
+      if (gameState.phase !== "NAVIGATION") return;
+      gameState.phase = "FEEDBACK";
+      gameState.streak = 0;
+
+      const trap = TRAP_NODES[trapId];
+      const fuelLost = trap.fuel_penalty;
+      const hpLost = Math.max(1, trap.hp_penalty) * gameState.cargo.hp_penalty_mult;
+
+      gameState.fuel = Math.max(0, gameState.fuel - fuelLost);
+      gameState.hp = Math.max(0, gameState.hp - hpLost);
+      updateHUD();
+
+      document.getElementById('nav-choices-drawer').classList.add('hidden');
+      const chDrawer = document.getElementById('challenge-drawer');
+      chDrawer.classList.remove('hidden');
+      chDrawer.classList.add('flex');
+
+      isChCollapsed = false;
+      document.getElementById('ch-drawer-body').classList.remove('hidden');
+      document.getElementById('ch-collapse-btn').textContent = "▼";
+
+      document.getElementById('ch-badge').textContent = '🚨 ЛОЖНЫЙ КУРС!';
+      document.getElementById('ch-badge').className = 'px-2 py-0.5 rounded text-[10px] sm:text-xs font-bold uppercase tracking-wider bg-rose-500/20 text-rose-300 border border-rose-500/40';
+      document.getElementById('ch-node-name').textContent = `${trap.name}`;
+      document.getElementById('ch-prompt').textContent = `Штурманская ошибка! Вы направили судно к узлу «${trap.name}», который уводит в сторону от маршрута.`;
+      document.getElementById('ch-options-container').innerHTML = '';
+      document.getElementById('ch-pinpoint-instruction').classList.add('hidden');
+      document.getElementById('btn-tactical-sonar').classList.add('hidden');
+      document.getElementById('btn-tactical-broker').classList.add('hidden');
+      document.getElementById('ch-timer').textContent = 'ШТРАФ';
+
+      const fbBox = document.getElementById('ch-feedback-box');
+      fbBox.classList.remove('hidden');
+      document.getElementById('fb-icon').textContent = '🧭';
+      const fbTitle = document.getElementById('fb-title');
+      fbTitle.textContent = 'Экстренный разворот на прежний фарватер!';
+      fbTitle.className = 'text-xs sm:text-sm font-bold text-rose-400';
+      document.getElementById('fb-subtitle').textContent = 'Судно потеряло мазут на возвращение к исходной точке.';
+      document.getElementById('fb-lore').textContent = trap.reason;
+
+      const deltasContainer = document.getElementById('fb-deltas');
+      deltasContainer.innerHTML = `
+        <span class="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-amber-300">⛽ -${fuelLost}</span>
+        <span class="px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300">💔 -${hpLost} HP</span>
+      `;
+    }
+
+    // =========================================================================
+    // 6. ЗАПУСК ИСПЫТАНИЯ НА УЗЛЕ
+    // =========================================================================
+    function initiateMoveToNode(targetNodeId, fuelCost, distanceKm) {
+      if (gameState.phase !== "NAVIGATION") return;
+
+      gameState.phase = "CHALLENGE";
+      gameState.activeChallengeNodeId = targetNodeId;
+      gameState.activeTransitionCost = fuelCost;
+      gameState.activeTransitionDist = distanceKm;
+      gameState.sonarUsedThisTurn = false;
+      gameState.brokerUsedThisTurn = false;
+      gameState.awaitingPinpointClick = false;
+
+      const challenge = CHALLENGES[targetNodeId];
+      const targetNode = WORLD_NODES[targetNodeId];
+
+      document.getElementById('nav-choices-drawer').classList.add('hidden');
+      const chDrawer = document.getElementById('challenge-drawer');
+      chDrawer.classList.remove('hidden');
+      chDrawer.classList.add('flex');
+
+      isChCollapsed = false;
+      document.getElementById('ch-drawer-body').classList.remove('hidden');
+      document.getElementById('ch-collapse-btn').textContent = "▼";
+
+      document.getElementById('ch-feedback-box').classList.add('hidden');
+      document.getElementById('ch-node-name').textContent = `Курс: ${targetNode.name}`;
+      document.getElementById('ch-prompt').textContent = challenge.prompt;
+
+      const badge = document.getElementById('ch-badge');
+      const optionsContainer = document.getElementById('ch-options-container');
+      const pinpointInstruction = document.getElementById('ch-pinpoint-instruction');
+      const sonarBtn = document.getElementById('btn-tactical-sonar');
+      const brokerBtn = document.getElementById('btn-tactical-broker');
+
+      optionsContainer.innerHTML = '';
+      optionsContainer.className = 'grid grid-cols-1 sm:grid-cols-3 gap-2 mb-1';
+      pinpointInstruction.classList.add('hidden');
+
+      sonarBtn.classList.add('hidden');
+      sonarBtn.classList.remove('opacity-40', 'pointer-events-none');
+      brokerBtn.classList.add('hidden');
+      brokerBtn.classList.remove('opacity-40', 'pointer-events-none');
+
+      startChallengeTimer(gameState.cargo.timer_sec);
+
+      if (challenge.mechanic === 'pinpoint') {
+        badge.textContent = '🎯 ПЕЛЕНГАЦИЯ';
+        badge.className = 'px-2 py-0.5 rounded text-[10px] sm:text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-500/30';
+        pinpointInstruction.classList.remove('hidden');
+        sonarBtn.classList.remove('hidden');
+
+        document.getElementById('map').classList.add('crosshair-cursor');
+
+        setTimeout(() => {
+          if (gameState.phase === "CHALLENGE") {
+            gameState.awaitingPinpointClick = true;
+          }
+        }, 80);
+
+      } else if (challenge.mechanic === 'border_control') {
+        badge.textContent = '🛂 КОНТРОЛЬ';
+        badge.className = 'px-2 py-0.5 rounded text-[10px] sm:text-xs font-bold uppercase tracking-wider bg-sky-500/20 text-sky-300 border border-sky-500/30';
+        brokerBtn.classList.remove('hidden');
+
+        const shuffledOpts = shuffleArray(challenge.options);
+        shuffledOpts.forEach(opt => {
+          const btn = document.createElement('button');
+          btn.dataset.correct = opt.is_correct ? "true" : "false";
+          btn.className = 'p-2.5 sm:p-3 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 hover:border-sky-400 text-left text-xs font-semibold text-slate-100 transition flex items-center justify-between gap-2';
+          btn.innerHTML = `<span>${opt.text}</span><span class="text-slate-500">→</span>`;
+          btn.onclick = () => resolveBorderControl(challenge, opt);
+          optionsContainer.appendChild(btn);
+        });
+
+      } else if (challenge.mechanic === 'anomaly_choice') {
+        badge.textContent = '🌪️ СВОДКА';
+        badge.className = 'px-2 py-0.5 rounded text-[10px] sm:text-xs font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30';
+        optionsContainer.className = 'grid grid-cols-1 sm:grid-cols-2 gap-2 mb-1';
+
+        const shuffledOpts = shuffleArray(challenge.options);
+        shuffledOpts.forEach(opt => {
+          const btn = document.createElement('button');
+          btn.className = 'p-2.5 sm:p-3 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 hover:border-purple-400 text-left text-xs font-medium text-slate-100 transition';
+          btn.innerHTML = `<div class="font-semibold text-white">${opt.text}</div>`;
+          btn.onclick = () => resolveAnomalyChoice(challenge, opt);
+          optionsContainer.appendChild(btn);
+        });
+      }
+    }
+
+    // =========================================================================
+    // 7. ТАЙМЕР И ИНСТРУМЕНТЫ
+    // =========================================================================
+    function startChallengeTimer(seconds) {
+      stopChallengeTimer();
+      challengeSecondsLeft = seconds;
+      updateTimerUI();
+      challengeTimerInterval = setInterval(() => {
+        challengeSecondsLeft--;
+        updateTimerUI();
+        if (challengeSecondsLeft <= 0) {
+          stopChallengeTimer();
+        }
+      }, 1000);
+    }
+
+    function stopChallengeTimer() {
+      if (challengeTimerInterval) {
+        clearInterval(challengeTimerInterval);
+        challengeTimerInterval = null;
+      }
+    }
+
+    function updateTimerUI() {
+      const el = document.getElementById('ch-timer');
+      if (challengeSecondsLeft > 0) {
+        el.textContent = `${challengeSecondsLeft}с`;
+        el.className = challengeSecondsLeft >= 5
+          ? "mono text-[10px] sm:text-xs font-bold text-emerald-400"
+          : "mono text-[10px] sm:text-xs font-bold text-amber-400";
+      } else {
+        el.textContent = gameState.cargo.id === "express" ? "-5⛽" : "0с";
+        el.className = "mono text-[10px] sm:text-xs font-bold text-rose-400";
+      }
+    }
+
+    function useSonarHint() {
+      if (gameState.sonarUsedThisTurn || !gameState.awaitingPinpointClick) return;
+      if (gameState.runCash < 120) {
+        alert("Недостаточно бортового фрахта ($120) для спутникового запроса!");
+        return;
+      }
+
+      gameState.runCash -= 120;
+      gameState.sonarUsedThisTurn = true;
+      updateHUD();
+      document.getElementById('btn-tactical-sonar').classList.add('opacity-40', 'pointer-events-none');
+
+      const challenge = CHALLENGES[gameState.activeChallengeNodeId];
+      const jitterLat = (Math.random() - 0.5) * 3.0;
+      const jitterLng = (Math.random() - 0.5) * 3.0;
+      const hintCenter = [challenge.target_coordinates.lat + jitterLat, challenge.target_coordinates.lng + jitterLng];
+
+      L.circle(hintCenter, {
+        radius: 650000,
+        color: '#22d3ee',
+        weight: 2,
+        dashArray: '8, 8',
+        fillColor: '#06b6d4',
+        fillOpacity: 0.14,
+        interactive: false
+      }).addTo(pinpointLayerGroup);
+
+      map.flyTo(hintCenter, 4, { duration: 0.8 });
+    }
+
+    function useBrokerHint() {
+      if (gameState.brokerUsedThisTurn || gameState.phase !== "CHALLENGE") return;
+      if (gameState.runCash < 90) {
+        alert("Недостаточно средств ($90) для консультации лоцмана!");
+        return;
+      }
+
+      const wrongBtns = Array.from(document.querySelectorAll('#ch-options-container button'))
+        .filter(b => b.dataset.correct === "false" && !b.disabled);
+
+      if (wrongBtns.length === 0) return;
+
+      gameState.runCash -= 90;
+      gameState.brokerUsedThisTurn = true;
+      updateHUD();
+
+      const btnToRemove = wrongBtns[0];
+      btnToRemove.disabled = true;
+      btnToRemove.className = "p-2.5 sm:p-3 rounded-xl bg-slate-950/50 border border-slate-800 text-left text-xs text-slate-600 line-through opacity-40 cursor-not-allowed";
+      document.getElementById('btn-tactical-broker').classList.add('opacity-40', 'pointer-events-none');
+    }
+
+    // =========================================================================
+    // 8. ПРОВЕРКА ОТВЕТОВ И ГАВЕРСИНУС
+    // =========================================================================
+    function calculateHaversineKm(lat1, lon1, lat2, lon2) {
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      let diffLon = ((lon2 - lon1 + 540) % 360) - 180;
+      const dLon = diffLon * Math.PI / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+        Math.sin(dLon / 2) * Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return Math.round(R * c);
+    }
+
+    function getStreakMultiplier() {
+      if (gameState.streak >= 4) return 2.0;
+      if (gameState.streak === 3) return 1.6;
+      if (gameState.streak === 2) return 1.35;
+      if (gameState.streak === 1) return 1.15;
+      return 1.0;
+    }
+
+    function unlockAtlasNode(nodeId) {
+      if (!playerProfile.atlas.includes(nodeId)) {
+        playerProfile.atlas.push(nodeId);
+        playerProfile.xp += 15;
+        saveProfile();
+      }
+    }
+
+    function onMapClickForPinpoint(e) {
+      if (gameState.phase !== "CHALLENGE" || !gameState.awaitingPinpointClick) return;
+
+      gameState.awaitingPinpointClick = false;
+      gameState.phase = "FEEDBACK";
+      stopChallengeTimer();
+
+      document.getElementById('map').classList.remove('crosshair-cursor');
+      document.getElementById('btn-tactical-sonar').classList.add('hidden');
+
+      // Разворачиваем шторку обратно, если игрок сворачивал её при поиске на карте
+      isChCollapsed = false;
+      document.getElementById('ch-drawer-body').classList.remove('hidden');
+      document.getElementById('ch-collapse-btn').textContent = "▼";
+
+      const challenge = CHALLENGES[gameState.activeChallengeNodeId];
+      const targetCoords = challenge.target_coordinates;
+      const clickedCoords = e.latlng;
+
+      const errorKm = calculateHaversineKm(
+        clickedCoords.lat, clickedCoords.lng,
+        targetCoords.lat, targetCoords.lng
+      );
+
+      const perfectRadius = Math.round(challenge.scoring_radius_km.perfect * gameState.specs.radarMult);
+      const goodRadius = Math.round(challenge.scoring_radius_km.good * gameState.specs.radarMult);
+
+      pinpointLayerGroup.clearLayers();
+
+      L.circle([targetCoords.lat, targetCoords.lng], {
+        radius: perfectRadius * 1000,
+        color: '#10b981',
+        weight: 1.5,
+        fillColor: '#10b981',
+        fillOpacity: 0.16,
+        interactive: false
+      }).addTo(pinpointLayerGroup);
+
+      L.circle([targetCoords.lat, targetCoords.lng], {
+        radius: goodRadius * 1000,
+        color: '#f59e0b',
+        weight: 1,
+        dashArray: '4, 6',
+        fillColor: '#f59e0b',
+        fillOpacity: 0.06,
+        interactive: false
+      }).addTo(pinpointLayerGroup);
+
+      const clickMarker = L.circleMarker([clickedCoords.lat, clickedCoords.lng], {
+        radius: 7,
+        fillColor: '#f59e0b',
+        color: '#0f172a',
+        weight: 2,
+        fillOpacity: 1,
+        interactive: false
+      }).addTo(pinpointLayerGroup);
+      clickMarker.bindTooltip(`Ваш пеленг (${errorKm} км)`, {
+        permanent: true, direction: 'bottom', className: 'tactical-tooltip'
+      }).openTooltip();
+
+      const targetMarker = L.circleMarker([targetCoords.lat, targetCoords.lng], {
+        radius: 8,
+        fillColor: '#10b981',
+        color: '#ffffff',
+        weight: 2,
+        fillOpacity: 1,
+        interactive: false
+      }).addTo(pinpointLayerGroup);
+      targetMarker.bindTooltip(`Цель: ${WORLD_NODES[gameState.activeChallengeNodeId].name}`, {
+        permanent: true, direction: 'top', className: 'tactical-tooltip'
+      }).openTooltip();
+
+      L.polyline([[clickedCoords.lat, clickedCoords.lng], [targetCoords.lat, targetCoords.lng]], {
+        color: '#f43f5e',
+        weight: 2.5,
+        dashArray: '6, 6',
+        interactive: false
+      }).addTo(pinpointLayerGroup);
+
+      map.flyTo([targetCoords.lat, targetCoords.lng], Math.max(map.getZoom(), 4), { duration: 0.7 });
+
+      const deviationFuelPenalty = errorKm <= perfectRadius
+        ? -3
+        : Math.min(22, Math.round((errorKm - perfectRadius) / 55));
+
+      let outcome, title, subtitle, isSuccess;
+      if (errorKm <= perfectRadius) {
+        unlockAtlasNode(gameState.activeChallengeNodeId);
+        outcome = { fuel_mod: deviationFuelPenalty, hp_mod: 0, cash_bonus: challenge.outcomes.perfect.cash_bonus };
+        title = 'Эталонная пеленгация! (+Атлас)';
+        subtitle = `Погрешность всего ${errorKm} км (идеал до ${perfectRadius} км).`;
+        isSuccess = true;
+      } else if (errorKm <= goodRadius) {
+        unlockAtlasNode(gameState.activeChallengeNodeId);
+        outcome = { fuel_mod: deviationFuelPenalty, hp_mod: 0, cash_bonus: challenge.outcomes.good.cash_bonus };
+        title = 'Фарватер найден (с перерасходом)';
+        subtitle = `Отклонение ${errorKm} км (допуск ${goodRadius} км). Маневр: +${deviationFuelPenalty}⛽.`;
+        isSuccess = true;
+      } else {
+        outcome = { fuel_mod: deviationFuelPenalty, hp_mod: -1, cash_bonus: 0 };
+        title = 'Серьезный промах!';
+        subtitle = `Ошибка ${errorKm} км (лимит ${goodRadius} км). Перерасход +${deviationFuelPenalty}⛽ и урон!`;
+        isSuccess = false;
+      }
+
+      document.getElementById('ch-pinpoint-instruction').classList.add('hidden');
+      applyStepOutcome(outcome, title, subtitle, challenge.lore_fact, isSuccess);
+    }
+
+    function resolveBorderControl(challenge, selectedOption) {
+      if (gameState.phase !== "CHALLENGE") return;
+      gameState.phase = "FEEDBACK";
+      stopChallengeTimer();
+
+      document.getElementById('ch-options-container').innerHTML = '';
+      document.getElementById('btn-tactical-broker').classList.add('hidden');
+
+      const isSuccess = selectedOption.is_correct;
+      if (isSuccess) unlockAtlasNode(gameState.activeChallengeNodeId);
+
+      const outcome = isSuccess ? challenge.outcomes.success : challenge.outcomes.fail;
+      const title = isSuccess ? 'Точное знание лоции!' : 'Навигационная ошибка!';
+      const subtitle = `Ваш выбор: «${selectedOption.text}»`;
+
+      applyStepOutcome(outcome, title, subtitle, challenge.lore_fact, isSuccess);
+    }
+
+    function resolveAnomalyChoice(challenge, selectedOption) {
+      if (gameState.phase !== "CHALLENGE") return;
+      gameState.phase = "FEEDBACK";
+      stopChallengeTimer();
+
+      document.getElementById('ch-options-container').innerHTML = '';
+      document.getElementById('ch-options-container').className = 'grid grid-cols-1 sm:grid-cols-3 gap-2 mb-1';
+
+      const isSuccess = selectedOption.is_correct;
+      if (isSuccess) unlockAtlasNode(gameState.activeChallengeNodeId);
+
+      const outcome = selectedOption.effect;
+      const title = outcome.title;
+      const subtitle = isSuccess ? 'Грамотный маневр капитана.' : 'Стихия нанесла урон судну.';
+
+      applyStepOutcome(outcome, title, subtitle, challenge.lore_fact, isSuccess);
+    }
+
+    function applyStepOutcome(outcome, title, subtitle, loreFact, isSuccess) {
+      if (isSuccess) {
+        gameState.streak++;
+      } else {
+        gameState.streak = 0;
+      }
+
+      const streakMult = getStreakMultiplier();
+      const speedBonus = (isSuccess && challengeSecondsLeft > 0) ? 80 : 0;
+      const expressOvertimePenalty = (gameState.cargo.id === "express" && challengeSecondsLeft <= 0) ? 5 : 0;
+
+      const totalFuelChange = -gameState.activeTransitionCost - (outcome.fuel_mod || 0) - expressOvertimePenalty;
+      const hpChange = (outcome.hp_mod || 0) * gameState.cargo.hp_penalty_mult;
+
+      let rawCash = outcome.cash_bonus || 0;
+      if (rawCash > 0) {
+        rawCash = Math.round(rawCash * gameState.cargo.mult * streakMult) + speedBonus;
+      }
+
+      gameState.fuel = Math.max(0, Math.min(gameState.maxFuel, gameState.fuel + totalFuelChange));
+      gameState.hp = Math.max(0, Math.min(gameState.maxHp, gameState.hp + hpChange));
+      gameState.runCash = Math.max(0, gameState.runCash + rawCash);
+      gameState.distanceKm += gameState.activeTransitionDist;
+
+      gameState.currentNodeId = gameState.activeChallengeNodeId;
+      if (!gameState.visitedNodes.includes(gameState.currentNodeId)) {
+        gameState.visitedNodes.push(gameState.currentNodeId);
+      }
+
+      updateHUD();
+
+      const fbBox = document.getElementById('ch-feedback-box');
+      fbBox.classList.remove('hidden');
+
+      document.getElementById('fb-icon').textContent = isSuccess ? '✅' : '⚠️';
+      const fbTitle = document.getElementById('fb-title');
+      fbTitle.textContent = title;
+      fbTitle.className = `text-xs sm:text-sm font-bold ${isSuccess ? 'text-emerald-400' : 'text-rose-400'}`;
+      document.getElementById('fb-subtitle').textContent = subtitle;
+      document.getElementById('fb-lore').textContent = loreFact;
+
+      const deltasContainer = document.getElementById('fb-deltas');
+      deltasContainer.innerHTML = '';
+
+      const fuelBadge = document.createElement('span');
+      fuelBadge.className = 'px-2 py-0.5 rounded bg-slate-900 border border-slate-700 text-amber-400';
+      fuelBadge.textContent = `⛽ ${totalFuelChange}`;
+      deltasContainer.appendChild(fuelBadge);
+
+      if (hpChange !== 0) {
+        const hpBadge = document.createElement('span');
+        hpBadge.className = 'px-2 py-0.5 rounded bg-rose-500/20 border border-rose-500/40 text-rose-300';
+        hpBadge.textContent = `💔 ${hpChange} HP`;
+        deltasContainer.appendChild(hpBadge);
+      }
+
+      if (rawCash !== 0) {
+        const cashBadge = document.createElement('span');
+        cashBadge.className = `px-2 py-0.5 rounded ${rawCash > 0 ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' : 'bg-rose-500/20 text-rose-300 border-rose-500/40'} border`;
+        cashBadge.textContent = `${rawCash > 0 ? '+' : ''}$${rawCash}`;
+        deltasContainer.appendChild(cashBadge);
+      }
+    }
+
+    function closeChallengeAndContinue() {
+      if (gameState.phase !== "FEEDBACK") return;
+
+      pinpointLayerGroup.clearLayers();
+      const chDrawer = document.getElementById('challenge-drawer');
+      chDrawer.classList.add('hidden');
+      chDrawer.classList.remove('flex');
+
+      renderMapProgressOnly();
+
+      if (gameState.hp <= 0) {
+        triggerEndGame(false, 'Трюм разрушен штормами и рифами. Груз потерян в океане.');
+        return;
+      }
+
+      if (gameState.currentNodeId === gameState.contract.target_node) {
+        triggerEndGame(true, `Экспедиция «${gameState.contract.title}» блестяще завершена!`);
+        return;
+      }
+
+      if (gameState.fuel <= 0) {
+        triggerEndGame(false, 'Топливные танки полностью осушены! Судно легло в дрейф.');
+        return;
+      }
+
+      gameState.phase = "NAVIGATION";
+      renderNavigationChoices();
+
+      const currentNode = WORLD_NODES[gameState.currentNodeId];
+      map.flyTo(currentNode.coords, map.getZoom(), { duration: 0.7 });
+    }
+
+    // =========================================================================
+    // 9. HUD, ШТАБ ФЛОТА, ВЕРФЬ ПРОКАЧКИ И АТЛАС ОТКРЫТИЙ
+    // =========================================================================
+    function updateHUD() {
+      const currentNode = WORLD_NODES[gameState.currentNodeId];
+      const rankInfo = getCaptainRankInfo();
+
+      document.getElementById('hud-rank-badge').textContent = `Ранг ${rankInfo.rank} • ${rankInfo.title}`;
+      document.getElementById('hud-cargo-badge').textContent = gameState.cargo.badge;
+      document.getElementById('hud-step-counter').textContent = `Узел #${gameState.visitedNodes.length}`;
+      document.getElementById('hud-contract-title').textContent = `${gameState.contract.title}`;
+      document.getElementById('hud-current-node').textContent = `• 📍 ${currentNode.name}`;
+
+      document.getElementById('hud-fuel').textContent = gameState.fuel;
+      const fuelPct = Math.round((gameState.fuel / gameState.maxFuel) * 100);
+      const fuelBar = document.getElementById('hud-fuel-bar');
+      fuelBar.style.width = `${Math.min(100, fuelPct)}%`;
+      fuelBar.className = `h-full transition-all duration-500 ${gameState.fuel > 30 ? 'bg-amber-400' : 'bg-rose-500'}`;
+
+      let heartsHtml = '';
+      for (let i = 0; i < gameState.maxHp; i++) {
+        heartsHtml += i < gameState.hp ? '❤️' : '<span class="opacity-25">🖤</span>';
+      }
+      document.getElementById('hud-hp').innerHTML = heartsHtml;
+
+      document.getElementById('hud-run-cash').textContent = `$${gameState.runCash}`;
+      document.getElementById('hud-streak').textContent = `x${getStreakMultiplier().toFixed(2).replace('.00', '.0')}`;
+      document.getElementById('hud-bank-badge').textContent = `$${playerProfile.bank}`;
+
+      const shopBtn = document.getElementById('btn-shop');
+      if (currentNode.has_shop) {
+        shopBtn.classList.remove('hidden');
+        document.getElementById('shop-port-name').textContent = `Порт ${currentNode.name} • На борту: $${gameState.runCash}`;
+      } else {
+        shopBtn.classList.add('hidden');
+      }
+    }
+
+    function openHubModal(defaultTab) {
+      renderHubContent();
+      switchHubTab(defaultTab || 'contracts');
+      const modal = document.getElementById('hub-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+    }
+
+    function closeHubModal() {
+      const modal = document.getElementById('hub-modal');
+      modal.classList.add('hidden');
+      modal.classList.remove('flex');
+    }
+
+    function switchHubTab(tabName) {
+      ['contracts', 'shipyard', 'atlas'].forEach(t => {
+        const panel = document.getElementById(`hub-tab-${t}`);
+        const btn = document.getElementById(`tab-btn-${t}`);
+        if (t === tabName) {
+          panel.classList.remove('hidden');
+          btn.className = "flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold bg-emerald-500 text-slate-950 transition";
+        } else {
+          panel.classList.add('hidden');
+          btn.className = "flex-1 sm:flex-initial px-2.5 sm:px-3.5 py-1.5 rounded-lg text-[11px] sm:text-xs font-bold text-slate-300 hover:text-white transition";
+        }
+      });
+    }
+
+    function renderHubContent() {
+      const rankInfo = getCaptainRankInfo();
+      const specs = getShipSpecs();
+
+      document.getElementById('hub-rank-pill').textContent =
+        `Ранг ${rankInfo.rank} • ${rankInfo.title} (${playerProfile.xp} XP)`;
+      document.getElementById('hub-bank-balance').textContent = `$${playerProfile.bank}`;
+      document.getElementById('atlas-count-badge').textContent =
+        `${playerProfile.atlas.length}/${Object.keys(CHALLENGES).length}`;
+
+      const cargoGrid = document.getElementById('cargo-selector-grid');
+      cargoGrid.innerHTML = '';
+      CARGO_TYPES.forEach(cg => {
+        const isSelected = cg.id === selectedCargoId;
+        const div = document.createElement('div');
+        div.onclick = () => {
+          selectedCargoId = cg.id;
+          renderHubContent();
+        };
+        div.className = `p-2.5 rounded-xl border cursor-pointer transition ${
+          isSelected
+            ? 'bg-amber-500/15 border-amber-400 shadow-md'
+            : 'bg-slate-950/70 border-slate-800 hover:border-slate-600'
+        }`;
+        div.innerHTML = `
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-bold text-white">${cg.name}</span>
+            ${isSelected ? '<span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-400 text-slate-950">АКТИВЕН</span>' : ''}
+          </div>
+          <p class="text-[11px] text-slate-400 leading-snug">${cg.desc}</p>
+        `;
+        cargoGrid.appendChild(div);
+      });
+
+      const contractsGrid = document.getElementById('contracts-selector-grid');
+      contractsGrid.innerHTML = '';
+      CONTRACTS.forEach((cnt, idx) => {
+        const bestRank = playerProfile.completed[cnt.contract_id];
+        const isUnlocked = rankInfo.rank >= cnt.req_rank;
+        const estReward = Math.round(cnt.reward_base * CARGO_TYPES.find(c => c.id === selectedCargoId).mult);
+
+        const card = document.createElement('div');
+        card.className = `p-3.5 rounded-xl border transition flex flex-col justify-between ${
+          !isUnlocked
+            ? 'bg-slate-950/60 border-slate-900 opacity-65'
+            : cnt.contract_id === selectedContractId
+            ? 'bg-emerald-500/10 border-emerald-500/60'
+            : 'bg-slate-900/90 border-slate-800 hover:border-slate-700'
+        }`;
+
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between gap-2 mb-1">
+              <span class="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-slate-800 text-amber-300 border border-slate-700">
+                #${idx + 1} • ${cnt.difficulty_stars}
+              </span>
+              ${
+                bestRank
+                  ? `<span class="text-[11px] font-bold text-emerald-400 mono">✓ Ранг ${bestRank}</span>`
+                  : '<span class="text-[11px] text-slate-500">Новый</span>'
+              }
+            </div>
+            <h3 class="text-sm sm:text-base font-bold text-white">${cnt.title}</h3>
+            <div class="text-xs font-semibold text-sky-400 mb-1">${cnt.subtitle}</div>
+            <p class="text-[11px] sm:text-xs text-slate-400 mb-2.5 leading-relaxed">${cnt.region_desc}</p>
+          </div>
+          <div class="flex items-center justify-between pt-2 border-t border-slate-800/80">
+            <div class="text-[11px] sm:text-xs mono text-emerald-400 font-bold">
+              +$${estReward} • +${cnt.xp_reward} XP
+            </div>
+            ${
+              isUnlocked
+                ? `<button onclick="startContract('${cnt.contract_id}', '${selectedCargoId}')" class="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs transition">
+                    В море →
+                   </button>`
+                : `<span class="px-2.5 py-1 rounded-lg bg-slate-800 text-slate-400 text-[11px] font-semibold">
+                    🔒 Ранг ${cnt.req_rank}
+                   </span>`
+            }
+          </div>
+        `;
+        contractsGrid.appendChild(card);
+      });
+
+      document.getElementById('ship-summary-specs').textContent =
+        `Бак: ${specs.maxFuel}⛽ | Трюм: ${specs.maxHp}❤️ | Радар: x${specs.radarMult} | Расход: ${Math.round(specs.engineMult * 100)}%`;
+
+      const upgradesGrid = document.getElementById('upgrades-grid');
+      upgradesGrid.innerHTML = '';
+      Object.keys(UPGRADE_DEFS).forEach(key => {
+        const def = UPGRADE_DEFS[key];
+        const lvl = playerProfile.upgrades[key];
+        const isMax = lvl >= 4;
+        const nextCost = isMax ? 0 : def.costs[lvl + 1];
+        const canAfford = playerProfile.bank >= nextCost;
+
+        const card = document.createElement('div');
+        card.className = 'p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 flex flex-col justify-between';
+        card.innerHTML = `
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <span class="font-bold text-xs sm:text-sm text-white">${def.name}</span>
+              <span class="mono text-[11px] font-bold px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                Ур. ${lvl + 1} / 5
+              </span>
+            </div>
+            <p class="text-[11px] sm:text-xs text-slate-400 mb-2.5">${def.desc}</p>
+          </div>
+          <div class="flex items-center justify-between pt-2 border-t border-slate-800">
+            <div class="text-[11px] sm:text-xs mono text-slate-300">
+              Сейчас: <b class="text-emerald-400">${def.values[lvl]}</b>
+              ${!isMax ? ` ➔ <b class="text-amber-300">${def.values[lvl + 1]}</b>` : ''}
+            </div>
+            ${
+              isMax
+                ? `<span class="px-2.5 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 text-[11px] font-bold">МАКСИМУМ</span>`
+                : `<button onclick="buyShipUpgrade('${key}')" class="px-3 py-1.5 rounded-lg font-bold text-xs mono transition ${
+                    canAfford
+                      ? 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                      : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  }">
+                    Купить ($${nextCost})
+                  </button>`
+            }
+          </div>
+        `;
+        upgradesGrid.appendChild(card);
+      });
+
+      const atlasGrid = document.getElementById('atlas-grid');
+      atlasGrid.innerHTML = '';
+      Object.keys(CHALLENGES).forEach(nodeId => {
+        const isUnlocked = playerProfile.atlas.includes(nodeId);
+        const node = WORLD_NODES[nodeId];
+        const ch = CHALLENGES[nodeId];
+
+        const item = document.createElement('div');
+        item.className = `p-3 rounded-xl border ${
+          isUnlocked ? 'bg-slate-900/95 border-emerald-500/40' : 'bg-slate-950/60 border-slate-900 opacity-55'
+        }`;
+        item.innerHTML = `
+          <div class="flex items-center justify-between mb-1">
+            <span class="text-xs font-bold ${isUnlocked ? 'text-emerald-300' : 'text-slate-500'}">
+              ${isUnlocked ? `📍 ${node.name}` : '🔒 Неизвестная точка'}
+            </span>
+            <span class="text-[10px] mono text-slate-400">${node.tag}</span>
+          </div>
+          <p class="text-[11px] text-slate-300 leading-relaxed">
+            ${isUnlocked ? ch.lore_fact : 'Найдите эту точку на слепом радаре или пройдите узел во время экспедиции, чтобы открыть карточку.'}
+          </p>
+        `;
+        atlasGrid.appendChild(item);
+      });
+    }
+
+    function buyShipUpgrade(key) {
+      const def = UPGRADE_DEFS[key];
+      const lvl = playerProfile.upgrades[key];
+      if (lvl >= 4) return;
+      const cost = def.costs[lvl + 1];
+      if (playerProfile.bank < cost) {
+        alert(`Недостаточно средств в Банке Компании ($${cost})! Завершите еще один рейс.`);
+        return;
+      }
+
+      playerProfile.bank -= cost;
+      playerProfile.upgrades[key]++;
+      saveProfile();
+      renderHubContent();
+      updateHUD();
+    }
+
+    function resetCareerProgress() {
+      if (!confirm("Сбросить весь капитал, прокачку верфи и открытый Атлас?")) return;
+      playerProfile = JSON.parse(JSON.stringify(DEFAULT_PROFILE));
+      saveProfile();
+      startContract("cnt_mumbai_istanbul", "standard");
+    }
+
+    function toggleShopModal() {
+      const modal = document.getElementById('shop-modal');
+      modal.classList.toggle('hidden');
+      modal.classList.toggle('flex');
+    }
+
+    function buyShopItem(type) {
+      if (type === 'fuel') {
+        if (gameState.runCash < 140) return alert('Недостаточно бортового фрахта ($140)!');
+        if (gameState.fuel >= gameState.maxFuel) return alert('Баки уже полны!');
+        gameState.runCash -= 140;
+        gameState.fuel = Math.min(gameState.maxFuel, gameState.fuel + 30);
+      } else if (type === 'fuel_small') {
+        if (gameState.runCash < 75) return alert('Недостаточно бортового фрахта ($75)!');
+        if (gameState.fuel >= gameState.maxFuel) return alert('Баки уже полны!');
+        gameState.runCash -= 75;
+        gameState.fuel = Math.min(gameState.maxFuel, gameState.fuel + 15);
+      } else if (type === 'hp') {
+        if (gameState.runCash < 180) return alert('Недостаточно бортового фрахта ($180)!');
+        if (gameState.hp >= gameState.maxHp) return alert('Трюм в полном порядке!');
+        gameState.runCash -= 180;
+        gameState.hp = Math.min(gameState.maxHp, gameState.hp + 1);
+      }
+      updateHUD();
+    }
+
+    function triggerEndGame(isVictory, reasonText) {
+      gameState.phase = "ENDGAME";
+      document.getElementById('nav-choices-drawer').classList.add('hidden');
+      const modal = document.getElementById('endgame-modal');
+      modal.classList.remove('hidden');
+      modal.classList.add('flex');
+
+      let totalPayout = 0;
+      let earnedXp = 0;
+      let rank = 'F';
+
+      if (isVictory) {
+        const contractReward = Math.round(gameState.contract.reward_base * gameState.cargo.mult);
+        const fuelBonus = gameState.fuel * 4;
+        totalPayout = gameState.runCash + contractReward + fuelBonus;
+        earnedXp = gameState.contract.xp_reward;
+
+        if (gameState.hp === gameState.maxHp && gameState.fuel >= 25) rank = 'S+';
+        else if (gameState.hp >= gameState.maxHp - 1) rank = 'A';
+        else rank = 'B';
+
+        playerProfile.bank += totalPayout;
+        playerProfile.xp += earnedXp;
+        playerProfile.completed[gameState.contract.contract_id] = rank;
+        saveProfile();
+      } else {
+        totalPayout = Math.round(gameState.runCash * 0.25);
+        earnedXp = 20;
+        playerProfile.bank += totalPayout;
+        playerProfile.xp += earnedXp;
+        saveProfile();
+      }
+
+      updateHUD();
+
+      document.getElementById('end-icon').textContent = isVictory ? '🏆' : '⚓';
+      const badge = document.getElementById('end-badge');
+      badge.textContent = isVictory ? 'КОНТРАКТ ВЫПОЛНЕН' : 'РЕЙС СОРВАН';
+      badge.className = `px-3 py-1 rounded-full text-[10px] sm:text-xs font-bold uppercase tracking-widest border ${
+        isVictory ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-rose-500/20 text-rose-400 border-rose-500/30'
+      }`;
+
+      document.getElementById('end-title').textContent = isVictory
+        ? `Швартовка в порту ${WORLD_NODES[gameState.contract.target_node].name}!`
+        : 'Экспедиция потерпела крушение';
+      document.getElementById('end-subtitle').textContent = reasonText;
+
+      document.getElementById('end-stat-cash').textContent = `+$${totalPayout}`;
+      document.getElementById('end-stat-xp').textContent = `+${earnedXp} XP`;
+      document.getElementById('end-stat-fuel').textContent = `${gameState.fuel} ед.`;
+      document.getElementById('end-stat-rank').textContent = rank;
+
+      const chainNames = gameState.visitedNodes.map(id => WORLD_NODES[id].name).join(' ➔ ');
+      document.getElementById('end-route-chain').textContent = chainNames;
+    }
+
+    function closeEndgameAndOpenHub(tabName) {
+      document.getElementById('endgame-modal').classList.add('hidden');
+      document.getElementById('endgame-modal').classList.remove('flex');
+      openHubModal(tabName);
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      await initMap();
+      startContract("cnt_mumbai_istanbul", "standard");
+    });
+  </script>
+</body>
+</html>
